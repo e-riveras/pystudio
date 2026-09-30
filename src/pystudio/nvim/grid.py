@@ -22,6 +22,9 @@ DEFAULT_SP = 0xFF0000
 
 UNDERLINE_ATTRS = ("underline", "undercurl", "underdotted", "underdashed")
 
+BAR = "\u258f"
+"""Left one-eighth block, the closest a character cell gets to a bar cursor."""
+
 
 class Grid:
     """Cells, styles, cursor and mode, driven by ``redraw`` events."""
@@ -232,11 +235,43 @@ class Grid:
     # --------------------------------------------------------------------- reading
 
     @property
+    def mode_info(self) -> dict[str, Any]:
+        if 0 <= self.mode_index < len(self.mode_infos):
+            return self.mode_infos[self.mode_index]
+        return {}
+
+    @property
     def cursor_shape(self) -> str:
         """``block``, ``horizontal`` or ``vertical`` for the current mode."""
-        if 0 <= self.mode_index < len(self.mode_infos):
-            return str(self.mode_infos[self.mode_index].get("cursor_shape", "block"))
-        return "block"
+        if not self.cursor_style_enabled:
+            return "block"
+        return str(self.mode_info.get("cursor_shape", "block"))
+
+    @property
+    def cursor_attr_id(self) -> int:
+        """Highlight Neovim wants the cursor drawn with, 0 when it has none."""
+        return int(self.mode_info.get("attr_id") or 0)
+
+    def cursor_segment(self, char: str, hl_id: int) -> Segment:
+        """The cursor cell, drawn according to the shape of the current mode.
+
+        A cell cannot be subdivided, so a vertical cursor becomes a thin bar
+        glyph in place of the character, and a horizontal one underlines the
+        character instead of covering it.
+        """
+        attr_id = self.cursor_attr_id
+        if attr_id:
+            cursor_style = self.style_for(attr_id)
+        else:
+            cursor_style = self.style_for(hl_id) + Style(reverse=True)
+
+        shape = self.cursor_shape
+        if shape == "vertical":
+            color = cursor_style.bgcolor or cursor_style.color
+            return Segment(BAR, Style(color=color, bgcolor=self._color(self.default_bg)))
+        if shape == "horizontal":
+            return Segment(char, self.style_for(hl_id) + Style(underline=True))
+        return Segment(char, cursor_style)
 
     def row_text(self, y: int) -> str:
         """Row ``y`` as a string. Useful in tests and for the status bar."""
@@ -270,9 +305,7 @@ class Grid:
             hl_id = hl_row[x]
             if x == cursor:
                 flush_run()
-                segments.append(
-                    Segment(char, self.style_for(hl_id) + Style(reverse=True)),
-                )
+                segments.append(self.cursor_segment(char, hl_id))
                 run_hl = hl_id
                 continue
             if hl_id != run_hl:

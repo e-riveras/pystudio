@@ -140,3 +140,60 @@ def test_unknown_events_are_ignored() -> None:
     grid = Grid(2, 1)
     grid.handle_redraw(redraw(["win_viewport", [1, 1000, 0, 5, 0, 20, 0, 1]], ["mouse_on", []]))
     assert grid.mouse_enabled is True
+
+
+def set_modes(grid: Grid) -> None:
+    grid.handle_redraw(
+        redraw(
+            ["hl_attr_define", [90, {"foreground": 0x000000, "background": 0xFFAA00}, {}, []]],
+            [
+                "mode_info_set",
+                [
+                    True,
+                    [
+                        {"cursor_shape": "block", "attr_id": 90},
+                        {"cursor_shape": "vertical", "attr_id": 90},
+                        {"cursor_shape": "horizontal", "attr_id": 90},
+                    ],
+                ],
+            ],
+            ["grid_line", [1, 0, 0, [["a"], ["b"], ["c"]]]],
+        )
+    )
+
+
+def test_block_cursor_uses_the_highlight_neovim_asked_for() -> None:
+    grid = Grid(3, 1)
+    set_modes(grid)
+    grid.handle_redraw(redraw(["mode_change", ["normal", 0]]))
+    segment = grid.row_segments(0, cursor=1)[1]
+    assert segment.text == "b"
+    assert segment.style is not None
+    assert segment.style.bgcolor is not None
+    assert segment.style.bgcolor.triplet.hex == "#ffaa00"
+
+
+def test_vertical_cursor_becomes_a_bar() -> None:
+    grid = Grid(3, 1)
+    set_modes(grid)
+    grid.handle_redraw(redraw(["mode_change", ["insert", 1]]))
+    segment = grid.row_segments(0, cursor=1)[1]
+    assert segment.text == "▏"
+    assert segment.style is not None and segment.style.color is not None
+    assert segment.style.color.triplet.hex == "#ffaa00"
+
+
+def test_horizontal_cursor_underlines_the_character() -> None:
+    grid = Grid(3, 1)
+    set_modes(grid)
+    grid.handle_redraw(redraw(["mode_change", ["replace", 2]]))
+    segment = grid.row_segments(0, cursor=1)[1]
+    assert segment.text == "b"
+    assert segment.style is not None and segment.style.underline is True
+
+
+def test_cursor_falls_back_to_reverse_without_mode_info() -> None:
+    grid = Grid(3, 1)
+    grid.handle_redraw(redraw(["grid_line", [1, 0, 0, [["a"], ["b"], ["c"]]]]))
+    segment = grid.row_segments(0, cursor=1)[1]
+    assert segment.style is not None and segment.style.reverse is True
