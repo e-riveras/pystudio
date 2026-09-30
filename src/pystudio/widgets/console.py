@@ -14,6 +14,7 @@ from textual.message import Message
 from textual.widgets import Input, RichLog
 
 HISTORY_LIMIT = 1000
+MATCHES_SHOWN = 20
 
 PROMPT = "In [{count}]: "
 CONTINUATION = "   ...: "
@@ -57,6 +58,13 @@ class ConsolePane(Vertical):
         """The user answered a kernel ``input()`` request."""
 
         text: str
+
+    @dataclass
+    class CompleteRequested(Message):
+        """Tab at the prompt: complete this text at this offset."""
+
+        code: str
+        cursor_pos: int
 
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
@@ -176,6 +184,25 @@ class ConsolePane(Vertical):
         except SyntaxError:
             return True
 
+    def apply_completion(self, matches: list[str], cursor_start: int, cursor_end: int) -> None:
+        """Insert a completion, or list the candidates and insert their prefix."""
+        if not matches:
+            return
+        widget = self.prompt
+        value = widget.value
+        if len(matches) == 1:
+            insert = matches[0]
+        else:
+            insert = os.path.commonprefix(matches)
+            shown = "  ".join(matches[:MATCHES_SHOWN])
+            if len(matches) > MATCHES_SHOWN:
+                shown += f"  \u2026 {len(matches)} matches"
+            self.show_note(shown)
+            if len(insert) <= cursor_end - cursor_start:
+                return
+        widget.value = value[:cursor_start] + insert + value[cursor_end:]
+        widget.cursor_position = cursor_start + len(insert)
+
     # ---------------------------------------------------------------------- history
 
     def _remember(self, code: str) -> None:
@@ -187,7 +214,17 @@ class ConsolePane(Vertical):
         self._history_index = len(self._history)
 
     def on_key(self, event) -> None:
-        if not self.prompt.has_focus or event.key not in ("up", "down"):
+        if not self.prompt.has_focus:
+            return
+        if event.key == "tab":
+            # Stop it here, or the Screen binding moves focus instead.
+            event.stop()
+            event.prevent_default()
+            widget = self.prompt
+            if widget.value.strip():
+                self.post_message(self.CompleteRequested(widget.value, widget.cursor_position))
+            return
+        if event.key not in ("up", "down"):
             return
         if not self._history:
             return

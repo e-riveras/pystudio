@@ -65,8 +65,17 @@ The same actions are available as `:PyStudioSend`, `:PyStudioSendCell`,
 `:PyStudioSendFile`, `:PyStudioInterrupt` and `:PyStudioRestart`. `<C-CR>` is
 bound to send-line too, for terminals that can tell it apart from `Enter`.
 
+At the console prompt, `Tab` completes through the kernel, `up` and `down` walk
+the history, and an empty line ends an unfinished block.
+
 In the plot pane, `[` and `]` step through the history and `ctrl+s` saves the
-current figure. In the variables pane, `enter` shows a value in the console.
+current figure.
+
+In the variables pane, `enter` opens a DataFrame, Series or array in a scrollable
+table, and prints anything else to the console. In that table, `s` sorts by the
+column under the cursor (pressing it again reverses), clicking a header does the
+same, and `escape` closes it. Rows are fetched a page at a time and sorting
+happens in the kernel, so a million-row frame opens as fast as a small one.
 
 Your Neovim can see pystudio: `vim.g.pystudio` is true, and
 `vim.g.pystudio_kernel` holds `idle`, `busy`, `restarting` or `dead` for a
@@ -103,6 +112,11 @@ statusline.
   print.
 - **Plots.** `image/png` from `display_data` goes to the plot pane, rendered by
   `textual-image` with whatever protocol the terminal supports.
+- **Table viewer.** The same quiet-expression trick fetches one page of rows at a
+  time, so nothing is loaded that is not on screen.
+- **Cursor.** A character cell cannot be subdivided, so a block cursor is drawn
+  reversed, a horizontal one underlines its character, and a vertical one becomes
+  a thin bar glyph in place of the character.
 
 ## Development
 
@@ -118,5 +132,10 @@ headless through Textual's pilot.
 
 ## Not in this version
 
-Notebook (`.ipynb`) editing, a sortable DataFrame viewer, completion in the
-console, and inline images in the editor buffer.
+Notebook (`.ipynb`) editing, inline images in the editor buffer, `ext_multigrid`
+(Neovim's own splits as separate panes), and choosing or reconnecting to a kernel
+after startup.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -20,9 +20,13 @@ class VariablesPane(DataTable):
 
     @dataclass
     class Inspect(Message):
-        """The user asked to see one variable in the console."""
+        """The user asked to see one variable."""
 
-        name: str
+        variable: Variable
+
+    def __init__(self, *, id: str | None = None) -> None:
+        super().__init__(id=id)
+        self._variables: dict[str, Variable] = {}
 
     def on_mount(self) -> None:
         self.cursor_type = "row"
@@ -31,6 +35,7 @@ class VariablesPane(DataTable):
 
     def show(self, variables: list[Variable]) -> None:
         """Replace every row, restoring the selected name and scroll position."""
+        self._variables = {variable.name: variable for variable in variables}
         selected = self.selected_name
         offset = self.scroll_offset.y
         self.clear()
@@ -60,5 +65,6 @@ class VariablesPane(DataTable):
 
     def action_inspect(self) -> None:
         name = self.selected_name
-        if name is not None:
-            self.post_message(self.Inspect(name))
+        variable = self._variables.get(name) if name is not None else None
+        if variable is not None:
+            self.post_message(self.Inspect(variable))

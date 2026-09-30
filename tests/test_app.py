@@ -13,7 +13,7 @@ from PIL import Image as PILImage
 
 from pystudio import messages as m
 from pystudio.app import PyStudioApp
-from pystudio.widgets import ConsolePane, NvimPane, VariablesPane
+from pystudio.widgets import ConsolePane, FrameViewer, NvimPane, VariablesPane
 
 pytestmark = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
 
@@ -160,3 +160,92 @@ async def test_png_display_data_lands_in_the_plot_pane(tmp_path) -> None:
 
         app.post_message(m.DisplayData(data={"image/png": payload}))
         await until(lambda: app.plots.count == 1, what="a figure in the plot pane")
+
+
+async def test_tab_completes_at_the_prompt(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        await app.kernel.execute("zz_unique_name = 1")
+        await until(lambda: "zz_unique_name" in names(app.variables), what="the variable")
+
+        app.console_pane.prompt.focus()
+        await pilot.press(*"zz_uni")
+        await pilot.press("tab")
+
+        await until(
+            lambda: app.console_pane.prompt.value == "zz_unique_name",
+            what="the completed name",
+        )
+
+
+async def test_tab_does_not_move_focus(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        prompt = app.console_pane.prompt
+        prompt.focus()
+        await pilot.press(*"x")
+        await pilot.press("tab")
+        assert app.focused is prompt
+
+
+async def open_variable(app: PyStudioApp, pilot, name: str) -> None:
+    """Put the cursor on a variable row and press enter."""
+    await until(lambda: name in names(app.variables), what=f"{name} in the table")
+    table = app.variables
+    table.focus()
+    table.move_cursor(row=table.get_row_index(name))
+    await pilot.press("enter")
+
+
+async def test_enter_on_a_dataframe_opens_the_viewer(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        await app.kernel.execute(
+            "import pandas as pd\nshown = pd.DataFrame({'a': [3, 1, 2], 'b': [4, 5, 6]})"
+        )
+        await open_variable(app, pilot, "shown")
+
+        await until(lambda: isinstance(app.screen, FrameViewer), what="the viewer")
+        viewer = app.screen
+        assert isinstance(viewer, FrameViewer)
+        await until(lambda: viewer.table.row_count == 3, what="the rows")
+        assert [str(column.label) for column in viewer.table.ordered_columns] == ["", "a", "b"]
+
+        await pilot.press("escape")
+        await until(lambda: not isinstance(app.screen, FrameViewer), what="the viewer closed")
+
+
+async def test_viewer_sorts_through_the_kernel(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        await app.kernel.execute("import pandas as pd\nshown = pd.DataFrame({'a': [3, 1, 2]})")
+        await open_variable(app, pilot, "shown")
+        await until(lambda: isinstance(app.screen, FrameViewer), what="the viewer")
+        viewer = app.screen
+        assert isinstance(viewer, FrameViewer)
+        await until(lambda: viewer.table.row_count == 3, what="the rows")
+
+        def column_a() -> list[str]:
+            return [str(viewer.table.get_cell_at((row, 1))) for row in range(3)]
+
+        assert column_a() == ["3", "1", "2"]
+        await pilot.press("right")  # off the index column, onto `a`
+        await pilot.press("s")
+        await until(lambda: column_a() == ["1", "2", "3"], what="an ascending sort")
+        await pilot.press("s")
+        await until(lambda: column_a() == ["3", "2", "1"], what="a descending sort")
+
+
+async def test_enter_on_a_scalar_prints_it_in_the_console(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        await app.kernel.execute("answer = 42")
+        await open_variable(app, pilot, "answer")
+
+        await until(lambda: "42" in transcript(app), what="the value in the console")
+        assert not isinstance(app.screen, FrameViewer)

@@ -25,7 +25,14 @@ from jupyter_client.manager import AsyncKernelManager
 from textual.message import Message
 
 from pystudio import messages as m
-from pystudio.introspect import PROBE_EXPR, SETUP, parse_probe
+from pystudio.introspect import (
+    PROBE_EXPR,
+    SETUP,
+    Frame,
+    frame_expr,
+    parse_frame,
+    parse_probe,
+)
 
 log = logging.getLogger(__name__)
 
@@ -33,9 +40,10 @@ Sink = Callable[[Message], None]
 
 READY_TIMEOUT = 60.0
 REQUEST_TIMEOUT = 5.0
+FRAME_TIMEOUT = 15.0
 ALIVE_POLL_SECONDS = 2.0
 TRACKED_IDS = 16
-"""How many recent silent executions and probes stay suppressed.
+"""How many recent silent executions, quiet requests and probes stay tracked.
 
 Shell replies and iopub messages travel on different channels, so a reply can
 arrive before the ``idle`` status that belongs to the same request. Ids are
@@ -62,8 +70,9 @@ class KernelSession:
         self._tasks: list[asyncio.Task[None]] = []
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         # Insertion-ordered, used as bounded sets.
-        self._silent: dict[str, None] = {}
-        self._probes: dict[str, None] = {}
+        self._silent: dict[str, None] = {}  # hide the output
+        self._quiet: dict[str, None] = {}  # hide the busy/idle churn too
+        self._probes: dict[str, None] = {}  # and emit a snapshot on reply
         self._restarting = False
         self._closing = False
 
@@ -120,6 +129,7 @@ class KernelSession:
             self._restarting = False
         self._pending.clear()
         self._silent.clear()
+        self._quiet.clear()
         self._probes.clear()
         await self._install_helper()
         self._emit(m.VariablesSnapshot([]))
@@ -154,7 +164,40 @@ class KernelSession:
             user_expressions={"vars": PROBE_EXPR},
         )
         self._track(self._silent, msg_id)
+        self._track(self._quiet, msg_id)
         self._track(self._probes, msg_id)
+        return msg_id
+
+    async def fetch_frame(
+        self,
+        name: str,
+        start: int,
+        stop: int,
+        *,
+        sort: str | None = None,
+        ascending: bool = True,
+    ) -> Frame:
+        """Read one page of a DataFrame, Series or array, for the table viewer."""
+        expression = frame_expr(name, start, stop, sort=sort, ascending=ascending)
+        content = await self._await_reply(
+            lambda: self._send_expression(expression), timeout=FRAME_TIMEOUT
+        )
+        result: dict[str, Any] = (content.get("user_expressions") or {}).get("value") or {}
+        if result.get("status") != "ok":
+            return Frame(kind="other")
+        text = (result.get("data") or {}).get("text/plain")
+        return parse_frame(text) if text else Frame(kind="other")
+
+    def _send_expression(self, expression: str) -> str:
+        """Evaluate an expression quietly and return the request's msg_id."""
+        msg_id: str = self.client.execute(
+            "",
+            silent=True,
+            store_history=False,
+            user_expressions={"value": expression},
+        )
+        self._track(self._silent, msg_id)
+        self._track(self._quiet, msg_id)
         return msg_id
 
     async def complete(self, code: str, cursor_pos: int | None = None) -> dict[str, Any]:
@@ -247,9 +290,10 @@ class KernelSession:
         parent_id = self._parent_id(message)
         content: dict[str, Any] = message.get("content") or {}
 
-        # Probes must stay completely invisible. Letting their busy/idle churn
-        # through would retrigger the refresh they were sent for, forever.
-        if parent_id in self._probes:
+        # Quiet requests must stay completely invisible. Letting a probe's
+        # busy/idle churn through would retrigger the refresh it was sent for,
+        # forever.
+        if parent_id in self._quiet:
             return
 
         if msg_type == "status":
@@ -303,13 +347,15 @@ class KernelSession:
         parent_id = self._parent_id(message)
         content: dict[str, Any] = message.get("content") or {}
 
-        if parent_id in self._probes:
-            self._emit_snapshot(content)
-            return
-
+        # Awaited requests come first: a quiet expression is tracked like a
+        # probe but its reply belongs to whoever is waiting for it.
         future = self._pending.get(parent_id)
         if future is not None and not future.done():
             future.set_result(content)
+            return
+
+        if parent_id in self._probes:
+            self._emit_snapshot(content)
 
     def _handle_stdin(self, message: dict[str, Any]) -> None:
         if message["header"]["msg_type"] != "input_request":

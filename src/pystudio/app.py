@@ -10,6 +10,7 @@ still reaches Neovim, or the console prompt, the rest of the time.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from rich.text import Text
@@ -18,10 +19,12 @@ from textual.binding import Binding
 from textual.containers import Container
 
 from pystudio import messages as m
+from pystudio.introspect import Variable
 from pystudio.kernel import KernelSession
 from pystudio.widgets import (
     PROTOCOL,
     ConsolePane,
+    FrameViewer,
     NvimPane,
     PlotsPane,
     StatusBar,
@@ -32,6 +35,11 @@ log = logging.getLogger(__name__)
 
 PROBE_DELAY = 0.1
 """Wait a beat before snapshotting variables, so a burst of cells costs one probe."""
+
+VIEWABLE_TYPES = {"DataFrame", "Series", "ndarray"}
+"""Types the table viewer opens on `enter`; anything else prints to the console."""
+
+TWO_DIMENSIONAL = re.compile(r"^\(\d+, \d+\)$")
 
 PANE_TITLES = {
     "editor": "editor",
@@ -277,8 +285,33 @@ class PyStudioApp(App):
         if self._kernel_ready:
             self.kernel.send_input(message.text)
 
+    def on_console_pane_complete_requested(self, message: ConsolePane.CompleteRequested) -> None:
+        if self._kernel_ready:
+            self.run_worker(self._complete(message.code, message.cursor_pos), name="complete")
+
+    async def _complete(self, code: str, cursor_pos: int) -> None:
+        try:
+            reply = await self.kernel.complete(code, cursor_pos)
+        except TimeoutError:
+            return
+        if reply.get("status") != "ok":
+            return
+        self.console_pane.apply_completion(
+            [str(match) for match in reply.get("matches", ())],
+            int(reply.get("cursor_start", cursor_pos)),
+            int(reply.get("cursor_end", cursor_pos)),
+        )
+
     def on_variables_pane_inspect(self, message: VariablesPane.Inspect) -> None:
-        self._execute(message.name)
+        variable = message.variable
+        if self._kernel_ready and self._is_viewable(variable):
+            self.push_screen(FrameViewer(variable, self.kernel.fetch_frame))
+            return
+        self._execute(variable.name)
+
+    @staticmethod
+    def _is_viewable(variable: Variable) -> bool:
+        return variable.type in VIEWABLE_TYPES or bool(TWO_DIMENSIONAL.match(variable.shape))
 
     def on_nvim_send_request(self, message: m.NvimSendRequest) -> None:
         self._execute("\n".join(message.lines))
