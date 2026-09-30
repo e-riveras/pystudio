@@ -3,6 +3,8 @@ name = "pystudio"
 version = "0.1.0"
 description = "A terminal IDE for Python data science: embedded Neovim, a Jupyter kernel, variables and plots in one screen"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Eduardo Rivera", email = "ef.riveras@gmail.com" }
 ]
