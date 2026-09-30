@@ -1,0 +1,25 @@
+Screen {
+    layout: vertical;
+}
+
+#panes {
+    layout: grid;
+    grid-size: 2 2;
+    grid-columns: 2fr 1fr;
+    grid-rows: 1fr 1fr;
+    height: 1fr;
+}
+
+#editor, #console, #variables, #plots {
+    border: round $surface-lighten-2;
+    border-title-color: $text-muted;
+    border-title-align: left;
+    height: 100%;
+    width: 100%;
+    padding: 0;
+}
+
+#editor:focus, #variables:focus, #plots:focus, #console:focus-within {
+    border: round $accent;
+    border-title-color: $accent;
+}

@@ -1,0 +1,45 @@
+[project]
+name = "pystudio"
+version = "0.1.0"
+description = "A terminal IDE for Python data science: embedded Neovim, a Jupyter kernel, variables and plots in one screen"
+readme = "README.md"
+authors = [
+    { name = "Eduardo Rivera", email = "ef.riveras@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.4.0",
+    "jupyter-client>=8.10.0",
+    "msgpack>=1.2.3",
+    "textual>=8.2.8",
+    "textual-image>=0.14.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.9",
+    "textual-dev>=1.8.0",
+]
+
+[project.scripts]
+pystudio = "pystudio.__main__:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
