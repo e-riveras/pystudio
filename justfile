@@ -9,6 +9,10 @@ run *ARGS:
 test *ARGS:
     uv run pytest {{ARGS}}
 
+# The guided tour
+demo:
+    uv run pystudio examples/demo.py
+
 # Fast tests only: no kernel, no Neovim
 unit:
     uv run pytest tests/test_grid.py tests/test_keys.py -q

@@ -39,6 +39,19 @@ uv run pystudio analysis.py
 Options: `--clean` starts Neovim without your config, `--nvim PATH` picks a
 different Neovim, `--kernel NAME` picks a different Jupyter kernel.
 
+## The guided tour
+
+```sh
+just demo
+```
+
+[`examples/demo.py`](examples/demo.py) walks through every feature in fourteen
+cells, each one saying which key to press and what should happen: sending lines
+and cells, the variable explorer, the table viewer and its paging, plots and
+their history, completion at the prompt, tracebacks, interrupting, restarting
+and replaying, and proving the editor really is your Neovim. A test runs all of
+it, so the tour cannot drift away from the code.
+
 ## Keys
 
 Neovim owns its whole keyspace, so pystudio's own keys sit behind a `ctrl+g`

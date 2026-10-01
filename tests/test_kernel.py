@@ -112,3 +112,14 @@ async def test_figure_arrives_as_png(kernel: KernelSession, recorder: Recorder) 
     await kernel.execute("import matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\nplt.show()\n")
     display = await recorder.wait_for(m.DisplayData)
     assert "image/png" in display.data
+
+
+async def test_barrier_waits_for_queued_work(kernel: KernelSession, recorder: Recorder) -> None:
+    """A reply to a later request proves the earlier executions are done."""
+    await kernel.execute("import time\ntime.sleep(0.6)\nmarker = 'done'\n")
+    await kernel.barrier()
+
+    recorder.clear()
+    await kernel.probe_variables()
+    snapshot = await recorder.wait_for(m.VariablesSnapshot)
+    assert "marker" in {variable.name for variable in snapshot.variables}

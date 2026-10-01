@@ -227,6 +227,16 @@ class KernelSession:
         finally:
             self._pending.pop(msg_id, None)
 
+    async def barrier(self, timeout: float = READY_TIMEOUT) -> None:
+        """Return once the kernel has finished everything queued before this call.
+
+        ipykernel serves shell requests in order, so a reply to a request sent
+        now proves every earlier execution has completed. iopub is a separate
+        socket, so a caller that needs the output as well should wait for the
+        trailing ``idle`` after this returns.
+        """
+        await self._await_reply(lambda: self.client.kernel_info(), timeout=timeout)
+
     async def _wait_ready(self, timeout: float = READY_TIMEOUT) -> None:
         """Wait for the kernel to answer ``kernel_info_request``.
 
@@ -238,7 +248,7 @@ class KernelSession:
         deadline = time.monotonic() + timeout
         while True:
             try:
-                await self._await_reply(lambda: self.client.kernel_info(), timeout=2.0)
+                await self.barrier(timeout=2.0)
                 return
             except TimeoutError:
                 if time.monotonic() >= deadline:
