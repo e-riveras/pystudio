@@ -1,5 +1,5 @@
 [project]
-name = "pystudio"
+name = "pystudio-tui"
 version = "0.1.0"
 description = "A terminal IDE for Python data science: embedded Neovim, a Jupyter kernel, variables and plots in one screen"
 readme = "README.md"
@@ -9,6 +9,22 @@ authors = [
     { name = "Eduardo Rivera", email = "ef.riveras@gmail.com" }
 ]
 requires-python = ">=3.12"
+keywords = ["ide", "terminal", "tui", "neovim", "jupyter", "data-science", "textual"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: User Interfaces",
+    "Topic :: Text Editors :: Integrated Development Environments (IDE)",
+]
 dependencies = [
     "ipykernel>=7.4.0",
     "jupyter-client>=8.10.0",
@@ -17,9 +33,18 @@ dependencies = [
     "textual-image>=0.14.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/e-riveras/pystudio"
+Repository = "https://github.com/e-riveras/pystudio"
+Issues = "https://github.com/e-riveras/pystudio/issues"
+Changelog = "https://github.com/e-riveras/pystudio/blob/main/CHANGELOG.md"
+
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "pystudio"
 
 [dependency-groups]
 dev = [

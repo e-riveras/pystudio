@@ -31,6 +31,16 @@ land in the plot pane.
 
 ## Install and run
 
+pystudio is published on PyPI as `pystudio-tui`; the command it installs is
+`pystudio`.
+
+```sh
+uv tool install pystudio-tui    # or: pipx install pystudio-tui
+pystudio analysis.py
+```
+
+From a checkout:
+
 ```sh
 uv sync
 uv run pystudio analysis.py
@@ -155,6 +165,11 @@ just test     # or: uv run pytest
 just lint
 just fmt
 ```
+
+To release, set the version in `pyproject.toml`, date its entry in
+`CHANGELOG.md`, commit, then run `just release` with a PyPI token in
+`UV_PUBLISH_TOKEN`. It lints, tests, builds, tags `v<version>`, publishes and
+pushes the tag.
 
 The kernel and Neovim layers are covered by integration tests that drive a real
 kernel and a real `nvim --clean --embed`; the app tests drive the whole UI

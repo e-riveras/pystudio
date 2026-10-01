@@ -28,3 +28,25 @@ fmt:
 # Textual's console, for debugging the UI in a second terminal
 console:
     uv run textual console
+
+# Build the sdist and wheel into dist/
+build:
+    rm -rf dist
+    uv build
+
+# Check, build, tag and publish a release; needs a PyPI token in UV_PUBLISH_TOKEN
+release: lint test build
+    #!/usr/bin/env sh
+    set -eu
+    version=$(uv version --short)
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "working tree is not clean" >&2
+        exit 1
+    fi
+    if grep -q "## \[$version\] - Unreleased" CHANGELOG.md; then
+        echo "CHANGELOG.md still marks $version as Unreleased" >&2
+        exit 1
+    fi
+    git tag -a "v$version" -m "v$version"
+    uv publish
+    git push origin "v$version"

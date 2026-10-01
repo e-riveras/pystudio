@@ -1649,7 +1649,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pystudio"
+name = "pystudio-tui"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
