@@ -75,7 +75,7 @@ class ConsolePane(Vertical):
 
     def compose(self):
         yield RichLog(id="console-log", wrap=True, markup=False, highlight=False, max_lines=5000)
-        yield Input(id="console-prompt", placeholder="python")
+        yield Input(id="console-prompt", placeholder="python", compact=True)
 
     def on_mount(self) -> None:
         self._load_history()
