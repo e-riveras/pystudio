@@ -96,6 +96,29 @@ async def test_chord_is_cancelled_by_a_plain_key(tmp_path) -> None:
         assert app._chord is False
 
 
+async def test_chord_leaves_the_console_prompt(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.query_one("#editor", NvimPane).channel > 0)
+        prompt = app.console_pane.prompt
+        prompt.focus()
+        await pilot.press(*"ab")
+
+        await pilot.press("ctrl+g", "1")
+        assert isinstance(app.focused, NvimPane)
+        assert prompt.value == "ab"
+
+
+async def test_empty_editor_has_no_intro_screen(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=(200, 80)) as pilot:  # Neovim skips the intro when cramped
+        editor = app.query_one("#editor", NvimPane)
+        await until(lambda: editor.grid.row_text(1).startswith("~"), what="an empty buffer")
+        await pilot.pause(0.3)
+        screen = "\n".join(editor.grid.row_text(y) for y in range(editor.grid.height))
+        assert "NVIM v" not in screen
+
+
 async def test_sending_a_line_runs_it_and_updates_the_variables(tmp_path) -> None:
     app = app_with(tmp_path)
     async with app.run_test(size=SIZE):

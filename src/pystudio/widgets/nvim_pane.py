@@ -39,6 +39,8 @@ class NvimPane(Widget, can_focus=True):
         if clean:
             argv.append("--clean")
         argv.append("-n")  # no swapfile: the editor is short-lived by design
+        # No intro screen: an empty editor should look empty, not like a splash.
+        argv += ["--cmd", "set shortmess+=I"]
         if file is not None:
             argv.append(str(file))
         self.grid = Grid(80, 24)

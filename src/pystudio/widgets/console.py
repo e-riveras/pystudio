@@ -21,6 +21,20 @@ CONTINUATION = "   ...: "
 RESULT = "Out[{count}]: "
 
 
+class Prompt(Input):
+    """The console's input line, which lets a pending ``ctrl+g`` chord through.
+
+    Textual skips a priority binding for any key the focused Input would type,
+    so without this the `1` of ``ctrl+g 1`` lands in the prompt instead of
+    moving focus.
+    """
+
+    def check_consume_key(self, key: str, character: str | None) -> bool:
+        if getattr(self.app, "chord_pending", False):
+            return False
+        return super().check_consume_key(key, character)
+
+
 def history_path() -> Path:
     """Where the prompt history lives, following the XDG state convention."""
     state = os.environ.get("XDG_STATE_HOME")
@@ -75,7 +89,7 @@ class ConsolePane(Vertical):
 
     def compose(self):
         yield RichLog(id="console-log", wrap=True, markup=False, highlight=False, max_lines=5000)
-        yield Input(id="console-prompt", placeholder="python", compact=True)
+        yield Prompt(id="console-prompt", placeholder="python", compact=True)
 
     def on_mount(self) -> None:
         self._load_history()

@@ -19,6 +19,12 @@ All notable changes to this project are recorded here. The format follows
 - `--kernel` no longer defaults to `python3`; naming a kernel now turns off
   environment detection.
 
+### Fixed
+
+- Starting without a file no longer shows Neovim's intro screen.
+- `ctrl+g` shortcuts work while typing in the console prompt; the second key
+  used to be typed into the prompt instead.
+
 ## [0.1.0] - 2026-10-01
 
 First release, on GitHub.

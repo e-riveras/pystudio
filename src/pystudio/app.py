@@ -182,6 +182,11 @@ class PyStudioApp(App):
             return self._chord
         return True
 
+    @property
+    def chord_pending(self) -> bool:
+        """Whether ``ctrl+g`` was pressed and the next key belongs to the chord."""
+        return self._chord
+
     def action_start_chord(self) -> None:
         self._chord = True
         self.status.set_note("ctrl+g …")
