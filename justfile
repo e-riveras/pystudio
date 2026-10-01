@@ -34,7 +34,7 @@ build:
     rm -rf dist
     uv build
 
-# Check, build, tag and publish a release; needs a PyPI token in UV_PUBLISH_TOKEN
+# Check, build, tag and publish a GitHub release with the sdist and wheel attached
 release: lint test build
     #!/usr/bin/env sh
     set -eu
@@ -47,6 +47,13 @@ release: lint test build
         echo "CHANGELOG.md still marks $version as Unreleased" >&2
         exit 1
     fi
+    notes=$(mktemp)
+    awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} /^\[/ {on=0} on' CHANGELOG.md > "$notes"
     git tag -a "v$version" -m "v$version"
-    uv publish
     git push origin "v$version"
+    gh release create "v$version" dist/* --title "v$version" --notes-file "$notes"
+    rm -f "$notes"
+
+# Upload the built dist/ to PyPI; needs a token in UV_PUBLISH_TOKEN
+publish: build
+    uv publish
