@@ -41,15 +41,29 @@ pystudio analysis.py
 Each [release](https://github.com/e-riveras/pystudio/releases) also has a wheel
 attached, which `uv tool install` or `pipx install` take as a path.
 
-From a checkout:
+Options: `--clean` starts Neovim without your config, `--nvim PATH` picks a
+different Neovim, `--python PATH` picks the kernel's interpreter, and
+`--kernel NAME` uses a registered Jupyter kernel instead.
+
+## Which Python runs your code
+
+pystudio is installed in its own isolated environment, so the kernel looks for
+your project's environment first. The first match wins:
+
+1. `--python PATH`
+2. `--kernel NAME`, a registered Jupyter kernel
+3. the active virtualenv, `$VIRTUAL_ENV`
+4. the nearest `.venv` in the opened file's directory or any parent
+5. pystudio's own Python, which has none of your packages
+
+The project's environment needs `ipykernel`. Without it pystudio falls back to
+its own Python and says so in the console. Add it once per project:
 
 ```sh
-uv sync
-uv run pystudio analysis.py
+uv add --dev ipykernel    # or: pip install ipykernel
 ```
 
-Options: `--clean` starts Neovim without your config, `--nvim PATH` picks a
-different Neovim, `--kernel NAME` picks a different Jupyter kernel.
+The status bar shows which environment the kernel is running in.
 
 ## The guided tour
 
@@ -163,6 +177,8 @@ statusline.
 ## Development
 
 ```sh
+just install  # put an editable `pystudio` on PATH, tracking this checkout
+just run analysis.py    # or run it from the checkout without installing
 just test     # or: uv run pytest
 just lint
 just fmt

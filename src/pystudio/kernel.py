@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from jupyter_client.asynchronous.client import AsyncKernelClient
+from jupyter_client.kernelspec import KernelSpec, KernelSpecManager
 from jupyter_client.manager import AsyncKernelManager
 from textual.message import Message
 
@@ -52,6 +53,22 @@ into the UI and retrigger the refresh it came from.
 """
 
 
+class InterpreterSpecs(KernelSpecManager):
+    """Serves one kernelspec that runs ipykernel in a given interpreter."""
+
+    def __init__(self, python: Path, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.python = python
+
+    def get_kernel_spec(self, kernel_name: str) -> KernelSpec:
+        return KernelSpec(
+            argv=[str(self.python), "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+            display_name=f"Python ({self.python})",
+            language="python",
+            metadata={"debugger": True},
+        )
+
+
 class KernelSession:
     """A running kernel plus the tasks that pump its channels."""
 
@@ -60,9 +77,11 @@ class KernelSession:
         sink: Sink,
         *,
         kernel_name: str = "python3",
+        python: Path | None = None,
         cwd: Path | str | None = None,
     ) -> None:
         self.kernel_name = kernel_name
+        self.python = python
         self.cwd = Path(cwd) if cwd is not None else Path.cwd()
         self.sink = sink
         self._km: AsyncKernelManager | None = None
@@ -85,9 +104,19 @@ class KernelSession:
         return self._kc
 
     async def start(self) -> None:
-        """Launch the kernel, connect, and install the introspection helper."""
+        """Launch the kernel, connect, and install the introspection helper.
+
+        With ``python`` set, the kernel runs in that interpreter rather than
+        through the ``kernel_name`` kernelspec.
+        """
         self._emit(m.KernelStatus("starting"))
-        km = AsyncKernelManager(kernel_name=self.kernel_name)
+        if self.python is not None:
+            km = AsyncKernelManager(
+                kernel_name=self.kernel_name,
+                kernel_spec_manager=InterpreterSpecs(self.python),
+            )
+        else:
+            km = AsyncKernelManager(kernel_name=self.kernel_name)
         await km.start_kernel(cwd=str(self.cwd))
         kc = km.client()
         kc.start_channels()

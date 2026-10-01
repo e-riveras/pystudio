@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
 
 from pystudio import messages as m
 from pystudio.kernel import KernelSession
@@ -123,3 +125,15 @@ async def test_barrier_waits_for_queued_work(kernel: KernelSession, recorder: Re
     await kernel.probe_variables()
     snapshot = await recorder.wait_for(m.VariablesSnapshot)
     assert "marker" in {variable.name for variable in snapshot.variables}
+
+
+async def test_runs_in_the_given_interpreter(recorder: Recorder, tmp_path) -> None:
+    python = Path(sys.executable)
+    session = KernelSession(recorder, python=python, cwd=tmp_path)
+    await session.start()
+    try:
+        await session.execute("import sys; sys.executable")
+        result = await recorder.wait_for(m.ExecuteResult)
+        assert result.data["text/plain"].strip("'\"") == str(python)
+    finally:
+        await session.shutdown()

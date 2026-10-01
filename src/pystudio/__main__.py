@@ -31,7 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("file", nargs="?", type=Path, help="script to open in the editor")
     parser.add_argument("--clean", action="store_true", help="start Neovim without your own config")
     parser.add_argument("--nvim", default="nvim", help="path to the Neovim executable")
-    parser.add_argument("--kernel", default="python3", help="Jupyter kernel name")
+    parser.add_argument(
+        "--python",
+        type=Path,
+        help="interpreter for the kernel (default: $VIRTUAL_ENV, then the nearest .venv)",
+    )
+    parser.add_argument(
+        "--kernel", help="registered Jupyter kernel to use instead of a project interpreter"
+    )
     return parser
 
 
@@ -47,14 +54,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pystudio: needs Neovim {need} or newer, found {have}", file=sys.stderr)
         return 1
 
+    from pystudio.interpreter import InterpreterError, resolve
+
+    start = args.file.parent if args.file is not None else Path.cwd()
+    try:
+        choice = resolve(python=args.python, kernel_name=args.kernel, start=start)
+    except InterpreterError as error:
+        print(f"pystudio: {error}", file=sys.stderr)
+        return 1
+
     from pystudio.app import PyStudioApp
 
-    app = PyStudioApp(
-        path=args.file,
-        clean=args.clean,
-        nvim=args.nvim,
-        kernel_name=args.kernel,
-    )
+    app = PyStudioApp(path=args.file, clean=args.clean, nvim=args.nvim, choice=choice)
     app.run()
     return 0
 

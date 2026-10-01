@@ -19,6 +19,7 @@ from textual.binding import Binding
 from textual.containers import Container
 
 from pystudio import messages as m
+from pystudio.interpreter import KernelChoice
 from pystudio.introspect import Variable
 from pystudio.kernel import KernelSession
 from pystudio.widgets import (
@@ -75,14 +76,17 @@ class PyStudioApp(App):
         clean: bool = False,
         nvim: str = "nvim",
         kernel_name: str = "python3",
+        choice: KernelChoice | None = None,
     ) -> None:
         super().__init__()
         self.path = path
         self.clean = clean
         self.nvim_executable = nvim
+        self.choice = choice or KernelChoice(kernel_name=kernel_name, label=kernel_name)
         self.kernel = KernelSession(
             self.post_message,
-            kernel_name=kernel_name,
+            kernel_name=self.choice.kernel_name,
+            python=self.choice.python,
             cwd=path.parent if path is not None else Path.cwd(),
         )
         self._chord = False
@@ -103,7 +107,7 @@ class PyStudioApp(App):
             yield VariablesPane(id="variables")
             yield ConsolePane(id="console")
             yield PlotsPane(id="plots")
-        yield StatusBar(kernel_name=self.kernel.kernel_name, protocol=PROTOCOL, id="status")
+        yield StatusBar(kernel_name=self.choice.label, protocol=PROTOCOL, id="status")
 
     def on_mount(self) -> None:
         for pane_id, title in PANE_TITLES.items():
@@ -112,6 +116,8 @@ class PyStudioApp(App):
         self.run_worker(self._start_kernel(), name="kernel-start")
 
     async def _start_kernel(self) -> None:
+        if self.choice.note:
+            self.console_pane.show_note(self.choice.note)
         try:
             await self.kernel.start()
         except Exception as error:  # noqa: BLE001 - surfaced in the UI instead
