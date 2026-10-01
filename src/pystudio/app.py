@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
 
 from rich.text import Text
@@ -48,6 +50,24 @@ PANE_TITLES = {
     "variables": "variables",
     "plots": "plots",
 }
+
+
+def while_running[M](
+    handler: Callable[[PyStudioApp, M], None],
+) -> Callable[[PyStudioApp, M], None]:
+    """Drop a kernel message that arrives once the app has begun shutting down.
+
+    Kernel messages keep coming while the kernel shuts down, and Textual drains
+    the queue after the panes are gone, so a late status would find no widget
+    to update.
+    """
+
+    @wraps(handler)
+    def guarded(app: PyStudioApp, message: M) -> None:
+        if app.is_running:
+            handler(app, message)
+
+    return guarded
 
 
 class PyStudioApp(App):
@@ -228,6 +248,7 @@ class PyStudioApp(App):
 
     # -------------------------------------------------------------- kernel messages
 
+    @while_running
     def on_kernel_status(self, message: m.KernelStatus) -> None:
         self.status.set_state(message.state)
         self.editor.publish_kernel_state(message.state)
@@ -236,16 +257,20 @@ class PyStudioApp(App):
         if message.state == "idle":
             self._schedule_probe()
 
+    @while_running
     def on_execute_input(self, message: m.ExecuteInput) -> None:
         self.console_pane.show_code(message.code, message.execution_count)
 
+    @while_running
     def on_stream_output(self, message: m.StreamOutput) -> None:
         self.console_pane.show_stream(message.name, message.text)
 
+    @while_running
     def on_execute_result(self, message: m.ExecuteResult) -> None:
         text = message.data.get("text/plain", "")
         self.console_pane.show_result(text, message.execution_count)
 
+    @while_running
     def on_display_data(self, message: m.DisplayData) -> None:
         png = message.data.get("image/png")
         if png is not None:
@@ -255,18 +280,22 @@ class PyStudioApp(App):
         if text:
             self.console_pane.write(Text(text))
 
+    @while_running
     def on_kernel_error(self, message: m.KernelError) -> None:
         if message.traceback:
             self.console_pane.show_traceback(message.traceback)
         else:
             self.console_pane.show_stream("stderr", f"{message.ename}: {message.evalue}")
 
+    @while_running
     def on_clear_output(self, message: m.ClearOutput) -> None:
         self.console_pane.clear_log()
 
+    @while_running
     def on_input_request(self, message: m.InputRequest) -> None:
         self.console_pane.ask_for_input(message.prompt, message.password)
 
+    @while_running
     def on_variables_snapshot(self, message: m.VariablesSnapshot) -> None:
         self.variables.show(message.variables)
 
