@@ -53,17 +53,32 @@ chord. Press `ctrl+g`, then:
 | `q` | quit (Neovim prompts about unsaved buffers) |
 | `escape` | cancel the chord |
 
-Inside the editor, with `<localleader>` (`\` unless you set one):
+Inside the editor, under `<localleader>` (`\` unless you set one):
 
 | Key | Action |
 | --- | --- |
-| `<localleader>l` | send the current line, or the visual selection, and advance |
-| `<localleader>c` | send the current `# %%` cell |
-| `<localleader>f` | send the whole buffer |
+| `l` | send the current line, or the visual selection, and advance past it |
+| `c` | send the current `# %%` cell, then move to the next one |
+| `f` | send the whole buffer |
+| `a` | send everything above this cell, to replay state after a restart |
+| `e` | send from the cursor to the end of the buffer |
+| `.` | send the last thing again |
+
+If you use a separate `<leader>`, the same six keys are offered there too, so
+`<space>c` works as well as `\c`. A key is skipped when it would collide with a
+mapping you already have — including as a prefix, so pystudio will not take
+`<leader>f` out from under your own `<leader>ff`. What it mapped and what it
+skipped are in `g:pystudio_keys` and `g:pystudio_keys_skipped`.
 
 The same actions are available as `:PyStudioSend`, `:PyStudioSendCell`,
-`:PyStudioSendFile`, `:PyStudioInterrupt` and `:PyStudioRestart`. `<C-CR>` is
+`:PyStudioSendFile`, `:PyStudioSendAbove`, `:PyStudioSendToEnd`,
+`:PyStudioSendLast`, `:PyStudioInterrupt` and `:PyStudioRestart`. `<C-CR>` is
 bound to send-line too, for terminals that can tell it apart from `Enter`.
+
+Cells are drawn: a rule above each marker, and a faint wash over the cell the
+cursor is in, so what `c` will send is visible before you press it. Both come
+from the `PyStudioCellBorder` and `PyStudioCell` highlight groups, which link to
+`Comment` and `CursorLine` by default and can be overridden in your config.
 
 At the console prompt, `Tab` completes through the kernel, `up` and `down` walk
 the history, and an empty line ends an unfinished block.
@@ -105,7 +120,9 @@ statusline.
   Rich segments.
 - **Send path.** `pystudio/lua/send.lua` is injected after attach and notifies
   pystudio over the same RPC channel that carries redraws back. No temp files, no
-  clipboard, no pseudo-terminal.
+  clipboard, no pseudo-terminal. `pystudio/lua/cells.lua` draws the cell
+  decoration with extmarks, in two namespaces: the rules only change when the
+  text does, the wash follows the cursor.
 - **Variables.** Snapshots are taken with an `execute_request` that has empty
   code and asks for `__pystudio_inspect__()` in `user_expressions`, so nothing is
   added to the kernel's history and nothing is published for the console to

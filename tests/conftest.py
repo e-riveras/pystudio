@@ -125,9 +125,10 @@ class NvimHarness:
         await self.rpc.close()
 
     async def install_send_lua(self) -> None:
-        from pystudio.nvim.bootstrap import load_lua
+        from pystudio.nvim.bootstrap import load_all
 
-        await self.rpc.request("nvim_exec_lua", load_lua(), [self.channel])
+        for _name, source in load_all():
+            await self.rpc.request("nvim_exec_lua", source, [self.channel])
 
     def sent(self) -> list[tuple[str, list]]:
         return [item for item in self.notifications if item[0].startswith("pystudio_")]

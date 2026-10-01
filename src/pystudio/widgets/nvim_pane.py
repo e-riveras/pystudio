@@ -11,7 +11,7 @@ from textual.strip import Strip
 from textual.widget import Widget
 
 from pystudio import messages as m
-from pystudio.nvim.bootstrap import load_lua
+from pystudio.nvim.bootstrap import load_all
 from pystudio.nvim.grid import Grid
 from pystudio.nvim.keys import key_event_to_nvim, mouse_button, mouse_modifiers
 from pystudio.nvim.rpc import NvimRpc
@@ -68,7 +68,11 @@ class NvimPane(Widget, can_focus=True):
         self.grid.resize(columns, rows)
         await self.rpc.request("nvim_ui_attach", columns, rows, UI_OPTIONS)
         self._attached = True
-        await self.rpc.request("nvim_exec_lua", load_lua(), [self.channel])
+        for name, source in load_all():
+            try:
+                await self.rpc.request("nvim_exec_lua", source, [self.channel])
+            except Exception:
+                log.exception("failed to install %s", name)
         # The file on the command line is opened before the autocmd exists, so
         # the first buffer name is asked for rather than waited for.
         name = await self.rpc.request("nvim_buf_get_name", 0)
