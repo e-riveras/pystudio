@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import socket
 import stat
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,19 @@ def test_running_kernels_skips_the_ones_that_are_gone(tmp_path):
         (tmp_path / "kernel-garbage.json").write_text("not json")
         assert running_kernels(tmp_path) == [alive]
         assert running_kernels(tmp_path, exclude=alive) == []
+
+
+def test_running_kernels_finds_one_on_unix_sockets(tmp_path):
+    # pytest's tmp_path is too long for a socket path on macOS.
+    with (
+        tempfile.TemporaryDirectory(dir="/tmp") as sockets,
+        socket.socket(socket.AF_UNIX) as listener,
+    ):
+        listener.bind(f"{sockets}/k-1")
+        listener.listen()
+        path = tmp_path / "kernel-ipc.json"
+        path.write_text(json.dumps({"ip": f"{sockets}/k", "transport": "ipc", "shell_port": 1}))
+        assert running_kernels(tmp_path) == [path]
 
 
 def test_candidates_lists_project_registered_and_running(tmp_path):

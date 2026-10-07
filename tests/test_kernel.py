@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import stat
 import sys
 from pathlib import Path
 
@@ -173,3 +175,18 @@ async def test_attached_session_can_interrupt(
         assert error.ename == "KeyboardInterrupt"
     finally:
         await attached.shutdown()
+
+
+async def test_kernel_listens_on_private_sockets_not_tcp(recorder: Recorder, tmp_path) -> None:
+    """Jupyter does not encrypt, so the kernel must not be reachable over TCP."""
+    session = KernelSession(recorder, cwd=tmp_path)
+    await session.start()
+    try:
+        info = json.loads(session.connection_file.read_text())
+        assert info["transport"] == "ipc"
+        sockets = Path(info["ip"]).parent
+        assert stat.S_IMODE(sockets.stat().st_mode) == 0o700
+        assert stat.S_IMODE(session.connection_file.stat().st_mode) == 0o600
+    finally:
+        await session.shutdown()
+    assert not sockets.exists()

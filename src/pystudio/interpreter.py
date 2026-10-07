@@ -127,7 +127,7 @@ def resolve(
 
 
 def running_kernels(runtime_dir: Path, exclude: Path | None = None) -> list[Path]:
-    """Connection files in ``runtime_dir`` whose kernel still answers on its shell port.
+    """Connection files in ``runtime_dir`` whose kernel still answers on its shell socket.
 
     Kernels that crash leave their connection file behind, so the file alone
     proves nothing.
@@ -138,11 +138,14 @@ def running_kernels(runtime_dir: Path, exclude: Path | None = None) -> list[Path
             continue
         try:
             info = json.loads(path.read_text())
-            address = (str(info["ip"]), int(info["shell_port"]))
-            if info.get("transport", "tcp") != "tcp":
-                continue
-            with socket.create_connection(address, timeout=PORT_TIMEOUT):
-                alive.append(path)
+            ip, port = str(info["ip"]), int(info["shell_port"])
+            if info.get("transport", "tcp") == "ipc":
+                with socket.socket(socket.AF_UNIX) as probe:
+                    probe.settimeout(PORT_TIMEOUT)
+                    probe.connect(f"{ip}-{port}")
+            else:
+                socket.create_connection((ip, port), timeout=PORT_TIMEOUT).close()
+            alive.append(path)
         except (OSError, ValueError, KeyError, TypeError):
             continue
     return alive

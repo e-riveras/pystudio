@@ -5,6 +5,11 @@ channel. Each task translates wire messages into :mod:`pystudio.messages`
 objects and hands them to a sink callback. Nothing here imports a widget, so the
 whole layer is testable without a UI.
 
+A kernel started here listens on Unix domain sockets in a directory only the
+user can enter, not on TCP. Jupyter signs its messages but does not encrypt
+them, so on loopback ports any local user could subscribe to iopub and read
+every output.
+
 The shell channel has exactly one consumer, this class. Request/reply pairs that
 callers need to await (completion, inspection) are resolved through a futures
 map keyed by ``msg_id``, rather than by reading the channel a second time, which
@@ -15,6 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -43,6 +50,8 @@ READY_TIMEOUT = 60.0
 REQUEST_TIMEOUT = 5.0
 FRAME_TIMEOUT = 15.0
 ALIVE_POLL_SECONDS = 2.0
+SOCKET_PATH_LIMIT = 90
+"""Longest socket path prefix to accept; ``sun_path`` holds 104 bytes on macOS."""
 TRACKED_IDS = 16
 """How many recent silent executions, quiet requests and probes stay tracked.
 
@@ -69,6 +78,15 @@ class InterpreterSpecs(KernelSpecManager):
         )
 
 
+def socket_dir() -> Path:
+    """A fresh directory for the kernel's sockets, readable by the user alone."""
+    directory = Path(tempfile.mkdtemp(prefix="pystudio-"))
+    if len(str(directory)) > SOCKET_PATH_LIMIT:
+        directory.rmdir()
+        directory = Path(tempfile.mkdtemp(prefix="pystudio-", dir="/tmp"))
+    return directory
+
+
 class KernelSession:
     """A running kernel plus the tasks that pump its channels.
 
@@ -91,6 +109,7 @@ class KernelSession:
         self.attach_to = connection_file
         self.cwd = Path(cwd) if cwd is not None else Path.cwd()
         self.sink = sink
+        self._sockets: Path | None = None
         self._km: AsyncKernelManager | None = None
         self._kc: AsyncKernelClient | None = None
         self._tasks: list[asyncio.Task[None]] = []
@@ -134,13 +153,12 @@ class KernelSession:
             kc = AsyncKernelClient()
             kc.load_connection_file(str(self.attach_to))
         else:
+            self._sockets = socket_dir()
+            km = AsyncKernelManager(
+                kernel_name=self.kernel_name, transport="ipc", ip=str(self._sockets / "k")
+            )
             if self.python is not None:
-                km = AsyncKernelManager(
-                    kernel_name=self.kernel_name,
-                    kernel_spec_manager=InterpreterSpecs(self.python),
-                )
-            else:
-                km = AsyncKernelManager(kernel_name=self.kernel_name)
+                km.kernel_spec_manager = InterpreterSpecs(self.python)
             self._km = km
             await km.start_kernel(cwd=str(self.cwd))
             kc = km.client()
@@ -169,6 +187,9 @@ class KernelSession:
         if self._km is not None:
             await self._km.shutdown_kernel(now=True)
         self._kc = self._km = None
+        if self._sockets is not None:
+            shutil.rmtree(self._sockets, ignore_errors=True)
+            self._sockets = None
 
     async def restart(self) -> None:
         """Restart the kernel in place, keeping the same ports and channels."""

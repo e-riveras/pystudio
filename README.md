@@ -65,6 +65,11 @@ uv add --dev ipykernel    # or: pip install ipykernel
 
 The status bar shows which environment the kernel is running in.
 
+Jupyter signs kernel messages but does not encrypt them, so pystudio starts its
+kernel on Unix domain sockets in a directory only you can enter, not on TCP
+ports. Nobody else on the machine can read your output, and nothing listens on
+the network.
+
 `ctrl+g k` changes it without leaving: it lists the project's environment, the
 registered Jupyter kernels and the kernels already running on this machine.
 Picking one of the first two starts a fresh kernel in place of the current one.

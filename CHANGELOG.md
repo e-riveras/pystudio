@@ -18,6 +18,8 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- The kernel listens on Unix domain sockets in a private directory instead of
+  unencrypted TCP ports on loopback.
 - `--kernel` no longer defaults to `python3`; naming a kernel now turns off
   environment detection.
 
