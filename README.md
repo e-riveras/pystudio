@@ -65,6 +65,13 @@ uv add --dev ipykernel    # or: pip install ipykernel
 
 The status bar shows which environment the kernel is running in.
 
+`ctrl+g k` changes it without leaving: it lists the project's environment, the
+registered Jupyter kernels and the kernels already running on this machine.
+Picking one of the first two starts a fresh kernel in place of the current one.
+Picking a running kernel attaches to it, sharing its namespace with whatever
+started it; pystudio can interrupt such a kernel but will not restart it, and
+leaves it running on exit.
+
 ## The guided tour
 
 ```sh
@@ -89,6 +96,7 @@ chord. Press `ctrl+g`, then:
 | `z` | zoom the focused pane, toggle |
 | `r` | restart the kernel |
 | `i` | interrupt the kernel |
+| `k` | pick another kernel |
 | `q` | quit (Neovim prompts about unsaved buffers) |
 | `escape` | cancel the chord |
 
@@ -196,9 +204,8 @@ headless through Textual's pilot.
 
 ## Not in this version
 
-Notebook (`.ipynb`) editing, inline images in the editor buffer, `ext_multigrid`
-(Neovim's own splits as separate panes), and choosing or reconnecting to a kernel
-after startup.
+Notebook (`.ipynb`) editing, inline images in the editor buffer, and
+`ext_multigrid` (Neovim's own splits as separate panes).
 
 ## License
 

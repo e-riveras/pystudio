@@ -13,6 +13,8 @@ All notable changes to this project are recorded here. The format follows
   falls back to its own Python and says how to fix it. The status bar names
   the environment.
 - `--python PATH` picks the kernel's interpreter explicitly.
+- `ctrl+g k` opens a kernel picker: switch to the project's environment or a
+  registered Jupyter kernel, or attach to a kernel that is already running.
 
 ### Changed
 
@@ -22,6 +24,7 @@ All notable changes to this project are recorded here. The format follows
 ### Fixed
 
 - Starting without a file no longer shows Neovim's intro screen.
+- A kernel that fails to start is cleaned up instead of left running.
 - `ctrl+g` shortcuts work while typing in the console prompt; the second key
   used to be typed into the prompt instead.
 

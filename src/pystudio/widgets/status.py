@@ -43,6 +43,10 @@ class StatusBar(Static):
         self.state = state
         self.redraw()
 
+    def set_kernel(self, kernel_name: str) -> None:
+        self.kernel_name = kernel_name
+        self.redraw()
+
     def set_filename(self, path: str) -> None:
         self.filename = Path(path).name if path else ""
         self.redraw()

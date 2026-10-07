@@ -6,14 +6,17 @@ import asyncio
 import base64
 import io
 import shutil
+import sys
 import time
+from pathlib import Path
 
 import pytest
 from PIL import Image as PILImage
 
 from pystudio import messages as m
 from pystudio.app import PyStudioApp
-from pystudio.widgets import ConsolePane, FrameViewer, NvimPane, VariablesPane
+from pystudio.interpreter import KernelChoice
+from pystudio.widgets import ConsolePane, FrameViewer, KernelPicker, NvimPane, VariablesPane
 
 pytestmark = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
 
@@ -272,3 +275,38 @@ async def test_enter_on_a_scalar_prints_it_in_the_console(tmp_path) -> None:
 
         await until(lambda: "42" in transcript(app), what="the value in the console")
         assert not isinstance(app.screen, FrameViewer)
+
+
+async def test_chord_k_switches_the_kernel(tmp_path, monkeypatch) -> None:
+    other = KernelChoice(python=Path(sys.executable), label="other")
+    monkeypatch.setattr("pystudio.app.candidates", lambda **_: [KernelChoice(), other])
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a started kernel")
+        app._execute("before = 1")
+        await until(lambda: "before" in names(app.variables), what="a variable")
+        first = app.kernel
+
+        await pilot.press("ctrl+g", "k")
+        await until(lambda: isinstance(app.screen, KernelPicker), what="the picker")
+        await pilot.press("down", "enter")
+        await until(lambda: app.kernel is not first and app._kernel_ready, what="the second kernel")
+
+        assert app.status.kernel_name == "other"
+        assert app.variables.row_count == 0
+        app._execute("import sys; sys.executable")
+        await until(lambda: sys.executable in transcript(app), what="the new interpreter")
+        assert first._km is None
+
+
+async def test_picker_closes_without_switching(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("pystudio.app.candidates", lambda **_: [KernelChoice()])
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a started kernel")
+        first = app.kernel
+        await pilot.press("ctrl+g", "k")
+        await until(lambda: isinstance(app.screen, KernelPicker), what="the picker")
+        await pilot.press("escape")
+        await until(lambda: not isinstance(app.screen, KernelPicker), what="the picker to close")
+        assert app.kernel is first

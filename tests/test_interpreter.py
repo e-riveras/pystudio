@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import socket
 import stat
 from pathlib import Path
 
@@ -8,9 +10,11 @@ import pytest
 from pystudio.interpreter import (
     InterpreterError,
     KernelChoice,
+    candidates,
     env_python,
     find_project_python,
     resolve,
+    running_kernels,
 )
 
 
@@ -71,3 +75,40 @@ def test_explicit_python_without_ipykernel_is_an_error(tmp_path):
     python = fake_env(tmp_path / "bare", ipykernel=False)
     with pytest.raises(InterpreterError, match="cannot import ipykernel"):
         resolve(python=python, start=tmp_path, env={})
+
+
+def connection_file(runtime_dir: Path, name: str, port: int) -> Path:
+    path = runtime_dir / f"kernel-{name}.json"
+    path.write_text(json.dumps({"ip": "127.0.0.1", "transport": "tcp", "shell_port": port}))
+    return path
+
+
+def test_running_kernels_skips_the_ones_that_are_gone(tmp_path):
+    with socket.socket() as listener, socket.socket() as closed:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        closed.bind(("127.0.0.1", 0))  # bound but not listening: connections are refused
+        alive = connection_file(tmp_path, "alive", listener.getsockname()[1])
+        connection_file(tmp_path, "stale", closed.getsockname()[1])
+        (tmp_path / "kernel-garbage.json").write_text("not json")
+        assert running_kernels(tmp_path) == [alive]
+        assert running_kernels(tmp_path, exclude=alive) == []
+
+
+def test_candidates_lists_project_registered_and_running(tmp_path):
+    python = fake_env(tmp_path / ".venv")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        running = connection_file(runtime, "abcdef0123456789", listener.getsockname()[1])
+        choices = candidates(
+            start=tmp_path, env={}, kernel_names=["python3", "ir"], runtime_dir=runtime
+        )
+    assert choices == [
+        KernelChoice(python=python, label=".venv"),
+        KernelChoice(kernel_name="python3", label="python3"),
+        KernelChoice(kernel_name="ir", label="ir"),
+        KernelChoice(connection_file=running, label="abcdef01"),
+    ]

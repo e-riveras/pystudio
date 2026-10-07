@@ -70,7 +70,12 @@ class InterpreterSpecs(KernelSpecManager):
 
 
 class KernelSession:
-    """A running kernel plus the tasks that pump its channels."""
+    """A running kernel plus the tasks that pump its channels.
+
+    With ``connection_file`` set the session attaches to a kernel some other
+    process started. It then owns the channels but not the process: shutting
+    down leaves the kernel running, and restarting is not this session's call.
+    """
 
     def __init__(
         self,
@@ -78,10 +83,12 @@ class KernelSession:
         *,
         kernel_name: str = "python3",
         python: Path | None = None,
+        connection_file: Path | None = None,
         cwd: Path | str | None = None,
     ) -> None:
         self.kernel_name = kernel_name
         self.python = python
+        self.attach_to = connection_file
         self.cwd = Path(cwd) if cwd is not None else Path.cwd()
         self.sink = sink
         self._km: AsyncKernelManager | None = None
@@ -103,25 +110,43 @@ class KernelSession:
             raise RuntimeError("kernel is not started")
         return self._kc
 
+    @property
+    def owned(self) -> bool:
+        """Whether this session started the kernel, rather than attaching to it."""
+        return self.attach_to is None
+
+    @property
+    def connection_file(self) -> Path | None:
+        """The running kernel's connection file, which another client can attach to."""
+        if self.attach_to is not None:
+            return self.attach_to
+        return Path(self._km.connection_file) if self._km is not None else None
+
     async def start(self) -> None:
-        """Launch the kernel, connect, and install the introspection helper.
+        """Launch or attach to the kernel, and install the introspection helper.
 
         With ``python`` set, the kernel runs in that interpreter rather than
-        through the ``kernel_name`` kernelspec.
+        through the ``kernel_name`` kernelspec. If this raises, ``shutdown``
+        still cleans up whatever was started.
         """
         self._emit(m.KernelStatus("starting"))
-        if self.python is not None:
-            km = AsyncKernelManager(
-                kernel_name=self.kernel_name,
-                kernel_spec_manager=InterpreterSpecs(self.python),
-            )
+        if self.attach_to is not None:
+            kc = AsyncKernelClient()
+            kc.load_connection_file(str(self.attach_to))
         else:
-            km = AsyncKernelManager(kernel_name=self.kernel_name)
-        await km.start_kernel(cwd=str(self.cwd))
-        kc = km.client()
+            if self.python is not None:
+                km = AsyncKernelManager(
+                    kernel_name=self.kernel_name,
+                    kernel_spec_manager=InterpreterSpecs(self.python),
+                )
+            else:
+                km = AsyncKernelManager(kernel_name=self.kernel_name)
+            self._km = km
+            await km.start_kernel(cwd=str(self.cwd))
+            kc = km.client()
+        self._kc = kc
         kc.start_channels()
         await kc.wait_for_ready(timeout=READY_TIMEOUT)
-        self._km, self._kc = km, kc
 
         self._tasks = [
             asyncio.create_task(self._pump(kc.get_iopub_msg, self._handle_iopub), name="iopub"),
@@ -132,7 +157,7 @@ class KernelSession:
         await self._install_helper()
 
     async def shutdown(self) -> None:
-        """Stop the pumps, the channels, and the kernel process."""
+        """Stop the pumps and the channels, and the kernel process if it is ours."""
         self._closing = True
         for task in self._tasks:
             task.cancel()
@@ -148,7 +173,7 @@ class KernelSession:
     async def restart(self) -> None:
         """Restart the kernel in place, keeping the same ports and channels."""
         if self._km is None:
-            raise RuntimeError("kernel is not started")
+            raise RuntimeError("kernel is not started, or is not ours to restart")
         self._restarting = True
         self._emit(m.KernelStatus("restarting"))
         try:
@@ -165,9 +190,12 @@ class KernelSession:
 
     async def interrupt(self) -> None:
         """Send SIGINT (or the kernel's own interrupt mode) to the kernel."""
-        if self._km is None:
-            raise RuntimeError("kernel is not started")
-        await self._km.interrupt_kernel()
+        if self._km is not None:
+            await self._km.interrupt_kernel()
+            return
+        # Not our process to signal, so ask over the control channel instead.
+        client = self.client
+        client.control_channel.send(client.session.msg("interrupt_request", content={}))
 
     # -------------------------------------------------------------------- requests
 
@@ -310,10 +338,10 @@ class KernelSession:
     async def _watch_alive(self) -> None:
         while True:
             await asyncio.sleep(ALIVE_POLL_SECONDS)
-            if self._km is None or self._restarting or self._closing:
+            if self._kc is None or self._restarting or self._closing:
                 continue
             try:
-                alive = await self._km.is_alive()
+                alive = await self._kc.is_alive()
             except asyncio.CancelledError:
                 raise
             except Exception:

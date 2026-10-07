@@ -137,3 +137,39 @@ async def test_runs_in_the_given_interpreter(recorder: Recorder, tmp_path) -> No
         assert result.data["text/plain"].strip("'\"") == str(python)
     finally:
         await session.shutdown()
+
+
+async def test_attaches_to_a_running_kernel(kernel: KernelSession, tmp_path) -> None:
+    """A second session shares the first one's namespace and leaves it running."""
+    await kernel.execute("shared = 'from the owner'")
+    await kernel.barrier()
+
+    seen = Recorder()
+    attached = KernelSession(seen, connection_file=kernel.connection_file, cwd=tmp_path)
+    await attached.start()
+    try:
+        assert not attached.owned
+        await attached.execute("shared")
+        result = await seen.wait_for(m.ExecuteResult)
+        assert result.data["text/plain"] == "'from the owner'"
+    finally:
+        await attached.shutdown()
+
+    assert await kernel.complete("shar", 4)
+
+
+async def test_attached_session_can_interrupt(
+    kernel: KernelSession, recorder: Recorder, tmp_path
+) -> None:
+    attached = KernelSession(Recorder(), connection_file=kernel.connection_file, cwd=tmp_path)
+    await attached.start()
+    try:
+        await recorder.settle()
+        await kernel.execute("import time\nwhile True:\n    time.sleep(0.05)\n")
+        await recorder.wait_for(m.KernelStatus, match=lambda s: s.state == "busy")
+        await asyncio.sleep(0.3)
+        await attached.interrupt()
+        error = await recorder.wait_for(m.KernelError)
+        assert error.ename == "KeyboardInterrupt"
+    finally:
+        await attached.shutdown()

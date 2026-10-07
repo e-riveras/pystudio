@@ -9,6 +9,7 @@ still reaches Neovim, or the console prompt, the rest of the time.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Callable
@@ -19,15 +20,17 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
+from textual.screen import ModalScreen
 
 from pystudio import messages as m
-from pystudio.interpreter import KernelChoice
+from pystudio.interpreter import KernelChoice, candidates, has_ipykernel
 from pystudio.introspect import Variable
 from pystudio.kernel import KernelSession
 from pystudio.widgets import (
     PROTOCOL,
     ConsolePane,
     FrameViewer,
+    KernelPicker,
     NvimPane,
     PlotsPane,
     StatusBar,
@@ -85,6 +88,7 @@ class PyStudioApp(App):
         Binding("z", "chord_zoom", "zoom pane", priority=True, show=False),
         Binding("r", "chord_restart", "restart kernel", priority=True, show=False),
         Binding("i", "chord_interrupt", "interrupt kernel", priority=True, show=False),
+        Binding("k", "chord_kernels", "switch kernel", priority=True, show=False),
         Binding("q", "chord_quit", "quit", priority=True, show=False),
         Binding("escape", "chord_cancel", "cancel", priority=True, show=False),
     ]
@@ -103,16 +107,22 @@ class PyStudioApp(App):
         self.clean = clean
         self.nvim_executable = nvim
         self.choice = choice or KernelChoice(kernel_name=kernel_name, label=kernel_name)
-        self.kernel = KernelSession(
-            self.post_message,
-            kernel_name=self.choice.kernel_name,
-            python=self.choice.python,
-            cwd=path.parent if path is not None else Path.cwd(),
-        )
+        self.cwd = path.parent if path is not None else Path.cwd()
+        self.kernel = self._session(self.choice)
         self._chord = False
         self._probe_timer = None
         self._kernel_ready = False
+        self._switching = False
         self._quitting = False
+
+    def _session(self, choice: KernelChoice) -> KernelSession:
+        return KernelSession(
+            self.post_message,
+            kernel_name=choice.kernel_name,
+            python=choice.python,
+            connection_file=choice.connection_file,
+            cwd=self.cwd,
+        )
 
     # ------------------------------------------------------------------- structure
 
@@ -142,7 +152,8 @@ class PyStudioApp(App):
             await self.kernel.start()
         except Exception as error:  # noqa: BLE001 - surfaced in the UI instead
             log.exception("kernel failed to start")
-            self.console_pane.show_note(f"kernel failed to start: {error}")
+            await self.kernel.shutdown()
+            self.console_pane.show_note(f"kernel failed to start: {error}; ctrl+g k picks another")
             self.status.set_state("dead")
             return
         self._kernel_ready = True
@@ -232,12 +243,56 @@ class PyStudioApp(App):
         self.cancel_chord()
         if not self._kernel_ready:
             return
+        if not self.kernel.owned:
+            self.console_pane.show_note(
+                "this kernel was started elsewhere, so it is not pystudio's to restart"
+            )
+            return
         self.console_pane.show_note("restarting kernel…")
         self.run_worker(self._restart(), name="restart")
 
     async def _restart(self) -> None:
         await self.kernel.restart()
         self.console_pane.show_note("kernel restarted")
+
+    def action_chord_kernels(self) -> None:
+        self.cancel_chord()
+        if self._switching or isinstance(self.screen, ModalScreen):
+            return
+        choices = candidates(start=self.cwd, exclude=self.kernel.connection_file)
+        if self.choice.target not in [choice.target for choice in choices]:
+            choices.insert(0, self.choice)
+        self.push_screen(KernelPicker(choices, self.choice), self._picked)
+
+    def _picked(self, choice: KernelChoice | None) -> None:
+        if choice is None or self._switching:
+            return
+        if choice.target == self.choice.target and self._kernel_ready:
+            return
+        self._switching = True
+        self.run_worker(self._switch(choice), name="kernel-switch")
+
+    async def _switch(self, choice: KernelChoice) -> None:
+        """Replace the kernel. The old one keeps running until the new one can."""
+        try:
+            if choice.python is not None and not await asyncio.to_thread(
+                has_ipykernel, choice.python
+            ):
+                self.console_pane.show_note(
+                    f"{choice.label} has no ipykernel, so the kernel stays where it is. "
+                    "Add it with: uv add --dev ipykernel"
+                )
+                return
+            self.console_pane.show_note(f"switching kernel to {choice.label}…")
+            self._kernel_ready = False
+            await self.kernel.shutdown()
+            self.choice = choice
+            self.kernel = self._session(choice)
+            self.status.set_kernel(choice.label)
+            self.variables.show([])
+            await self._start_kernel()
+        finally:
+            self._switching = False
 
     def action_chord_quit(self) -> None:
         self.cancel_chord()
@@ -258,7 +313,8 @@ class PyStudioApp(App):
         self.status.set_state(message.state)
         self.editor.publish_kernel_state(message.state)
         if message.state == "dead":
-            self.console_pane.show_note("kernel died; ctrl+g r restarts it")
+            how = "ctrl+g r restarts it" if self.kernel.owned else "ctrl+g k picks another"
+            self.console_pane.show_note(f"kernel died; {how}")
         if message.state == "idle":
             self._schedule_probe()
 
