@@ -10,7 +10,12 @@ Screen {
     height: 1fr;
 }
 
-#editor, #console, #variables, #plots {
+#dock {
+    height: 100%;
+    width: 100%;
+}
+
+#editor, #console, #assistant, #variables, #plots {
     border: round $surface-lighten-2;
     border-title-color: $text-muted;
     border-title-align: left;
@@ -19,7 +24,7 @@ Screen {
     padding: 0;
 }
 
-#editor:focus, #variables:focus, #plots:focus, #console:focus-within {
+#editor:focus, #variables:focus, #plots:focus, #console:focus-within, #assistant:focus-within {
     border: round $accent;
     border-title-color: $accent;
 }

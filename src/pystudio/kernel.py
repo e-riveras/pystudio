@@ -37,6 +37,7 @@ from pystudio.introspect import (
     PROBE_EXPR,
     SETUP,
     Frame,
+    Variable,
     frame_expr,
     parse_frame,
     parse_probe,
@@ -60,6 +61,10 @@ arrive before the ``idle`` status that belongs to the same request. Ids are
 therefore forgotten by age rather than on reply, or that late status would leak
 into the UI and retrigger the refresh it came from.
 """
+
+
+class KernelReset(Exception):
+    """The kernel restarted, died or was shut down while a reply was awaited."""
 
 
 class InterpreterSpecs(KernelSpecManager):
@@ -177,6 +182,7 @@ class KernelSession:
     async def shutdown(self) -> None:
         """Stop the pumps and the channels, and the kernel process if it is ours."""
         self._closing = True
+        self._fail_pending("the kernel shut down")
         for task in self._tasks:
             task.cancel()
         if self._tasks:
@@ -196,6 +202,7 @@ class KernelSession:
         if self._km is None:
             raise RuntimeError("kernel is not started, or is not ours to restart")
         self._restarting = True
+        self._fail_pending("the kernel restarted")
         self._emit(m.KernelStatus("restarting"))
         try:
             await self._km.restart_kernel(now=False)
@@ -233,6 +240,15 @@ class KernelSession:
             self._track(self._silent, msg_id)
         return msg_id
 
+    async def run(self, code: str) -> str:
+        """Run ``code`` like :meth:`execute`, and wait for it to finish.
+
+        Returns the reply's status: ``ok``, ``error`` or ``aborted``. Raises
+        :class:`KernelReset` if the kernel goes away first.
+        """
+        content = await self._await_reply(lambda: self.client.execute(code), timeout=None)
+        return str(content.get("status", "error"))
+
     async def probe_variables(self) -> str:
         """Take a variable snapshot without touching history or producing output."""
         msg_id: str = self.client.execute(
@@ -257,14 +273,27 @@ class KernelSession:
     ) -> Frame:
         """Read one page of a DataFrame, Series or array, for the table viewer."""
         expression = frame_expr(name, start, stop, sort=sort, ascending=ascending)
+        ok, text = await self.evaluate(expression)
+        return parse_frame(text) if ok and text else Frame(kind="other")
+
+    async def evaluate(self, expression: str, timeout: float = FRAME_TIMEOUT) -> tuple[bool, str]:
+        """Evaluate one expression quietly: its repr, or the error it raised.
+
+        Nothing reaches the console or the history. The kernel answers requests
+        in order, so this waits behind whatever is running and may time out.
+        """
         content = await self._await_reply(
-            lambda: self._send_expression(expression), timeout=FRAME_TIMEOUT
+            lambda: self._send_expression(expression), timeout=timeout
         )
         result: dict[str, Any] = (content.get("user_expressions") or {}).get("value") or {}
-        if result.get("status") != "ok":
-            return Frame(kind="other")
-        text = (result.get("data") or {}).get("text/plain")
-        return parse_frame(text) if text else Frame(kind="other")
+        if result.get("status") == "ok":
+            return True, str((result.get("data") or {}).get("text/plain") or "")
+        return False, f"{result.get('ename', 'Error')}: {result.get('evalue', '')}"
+
+    async def variables(self) -> list[Variable]:
+        """The user namespace, awaited, for callers that are not the variables pane."""
+        ok, text = await self.evaluate(PROBE_EXPR)
+        return parse_probe(text) if ok else []
 
     def _send_expression(self, expression: str) -> str:
         """Evaluate an expression quietly and return the request's msg_id."""
@@ -295,7 +324,7 @@ class KernelSession:
         self.client.input(text)
 
     async def _await_reply(
-        self, send: Callable[[], str], timeout: float = REQUEST_TIMEOUT
+        self, send: Callable[[], str], timeout: float | None = REQUEST_TIMEOUT
     ) -> dict[str, Any]:
         msg_id = send()
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
@@ -368,6 +397,7 @@ class KernelSession:
             except Exception:
                 return
             if not alive:
+                self._fail_pending("the kernel died")
                 self._emit(m.KernelStatus("dead"))
                 return
 
@@ -463,6 +493,11 @@ class KernelSession:
         self._emit(m.VariablesSnapshot(parse_probe(text)))
 
     # ------------------------------------------------------------------- internals
+
+    def _fail_pending(self, reason: str) -> None:
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(KernelReset(reason))
 
     @staticmethod
     def _track(store: dict[str, None], msg_id: str) -> None:

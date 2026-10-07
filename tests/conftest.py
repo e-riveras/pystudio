@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import TypeVar
 
 import pytest
 from textual.message import Message
 
+from pystudio.assistant.provider import Event, ToolResult, ToolSpec
 from pystudio.kernel import KernelSession
 
 T = TypeVar("T", bound=Message)
@@ -156,3 +157,36 @@ async def nvim() -> AsyncIterator[NvimHarness]:
         yield harness
     finally:
         await harness.close()
+
+
+HANG = object()
+"""In a scripted turn: never answer, the way a slow model would not."""
+
+
+class Scripted:
+    """A provider that replays turns written by the test, and records what it was sent."""
+
+    name = "scripted"
+
+    def __init__(self, *turns: list) -> None:
+        self.turns = list(turns)
+        self.sent: list[tuple[str | None, list[ToolResult]]] = []
+        self.system = ""
+        self.tools: list[ToolSpec] = []
+
+    def start(self, system: str, tools: Sequence[ToolSpec]) -> Scripted:
+        self.system, self.tools = system, list(tools)
+        return self
+
+    async def send(
+        self, *, user: str | None = None, results: Sequence[ToolResult] = ()
+    ) -> AsyncIterator[Event]:
+        turn = self.turns.pop(0)
+        for event in turn:
+            if event is HANG:
+                await asyncio.Event().wait()
+            if isinstance(event, Exception):
+                raise event
+            yield event
+        # Recorded only once whole, as a real provider commits its transcript.
+        self.sent.append((user, list(results)))

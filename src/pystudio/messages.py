@@ -111,6 +111,16 @@ class NvimSendRequest(Message):
 
 
 @dataclass
+class NvimSendCells(Message):
+    """``send.lua`` asked for cells to be run one after another, stopping at a failure.
+
+    Each cell is the line its marker is on and its code.
+    """
+
+    cells: list[tuple[int, list[str]]]
+
+
+@dataclass
 class NvimEvent(Message):
     """Any other notification from the embedded Neovim."""
 

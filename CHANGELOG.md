@@ -13,11 +13,18 @@ All notable changes to this project are recorded here. The format follows
   falls back to its own Python and says how to fix it. The status bar names
   the environment.
 - `--python PATH` picks the kernel's interpreter explicitly.
+- An assistant, on `ctrl+g a`: ask for analysis code in plain words and it
+  writes `# %%` cells into the editor, after looking at the buffer, the
+  kernel's variables and the files it needs. It never runs the code. Uses
+  Anthropic's API and needs `ANTHROPIC_API_KEY` or `ant auth login`.
 - `ctrl+g k` opens a kernel picker: switch to the project's environment or a
   registered Jupyter kernel, or attach to a kernel that is already running.
 
 ### Changed
 
+- Sending the whole file (`\f`) or everything above (`\a`) runs one cell at a
+  time and stops at the first that fails, instead of sending one block that a
+  single error or typo stopped as a whole.
 - The kernel listens on Unix domain sockets in a private directory instead of
   unencrypted TCP ports on loopback.
 - `--kernel` no longer defaults to `python3`; naming a kernel now turns off

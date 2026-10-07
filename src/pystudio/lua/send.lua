@@ -68,12 +68,57 @@ function M.file()
   return vim.api.nvim_buf_get_lines(0, 0, -1, false)
 end
 
+--- Whether a cell has anything to run, rather than only comments and blanks.
+local function has_code(lines)
+  for _, line in ipairs(lines) do
+    if line:match("%S") and not line:match("^%s*#") then
+      return true
+    end
+  end
+  return false
+end
+
+--- The cells from line 1 to ``stop``, markers left out, each as
+--- { line = where it starts, lines = its code }. Cells with no code are skipped.
+function M.cells(stop)
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  stop = math.min(stop or #lines, #lines)
+  local cells = {}
+  local start, body = 1, {}
+  local function close()
+    if has_code(body) then
+      table.insert(cells, { line = start, lines = body })
+    end
+  end
+  for i = 1, stop do
+    if M.is_marker(lines[i]) then
+      close()
+      start, body = i, {}
+    else
+      table.insert(body, lines[i])
+    end
+  end
+  close()
+  return cells
+end
+
 local function send(lines)
   if lines == nil or #lines == 0 then
     return
   end
-  M.last = lines
+  M.last = { method = "pystudio_send", payload = lines }
   vim.rpcnotify(chan, "pystudio_send", lines)
+end
+
+--- Send cells as separate executions, which pystudio runs in order and stops
+--- at the first that fails, rather than as one block that a single error or
+--- typo would stop as a whole.
+local function send_cells(cells)
+  if #cells == 0 then
+    return
+  end
+  M.last = { method = "pystudio_send_cells", payload = cells }
+  vim.rpcnotify(chan, "pystudio_send_cells", cells)
 end
 
 --- Send the visual selection, or the line under the cursor, then advance.
@@ -110,23 +155,15 @@ function M.send_cell()
   end
 end
 
+--- The whole buffer, cell by cell.
 function M.send_file()
-  send(M.file())
+  send_cells(M.cells())
 end
 
---- Everything above the current cell: what a restart has to replay.
+--- Every cell above the current one, cell by cell: what a restart has to replay.
 function M.send_above()
-  local first, _, lines = M.cell_range()
-  local stop = first - 1
-  -- Drop the marker that opens the current cell; it is only a comment, but
-  -- sending it would echo a stray `# %%` into the console.
-  if stop >= 1 and M.is_marker(lines[stop]) then
-    stop = stop - 1
-  end
-  if stop < 1 then
-    return
-  end
-  send(vim.list_slice(lines, 1, stop))
+  local first = M.cell_range()
+  send_cells(M.cells(first - 1))
 end
 
 --- From the cursor to the end of the buffer.
@@ -137,7 +174,9 @@ function M.send_to_end()
 end
 
 function M.send_last()
-  send(M.last)
+  if M.last ~= nil then
+    vim.rpcnotify(chan, M.last.method, M.last.payload)
+  end
 end
 
 local function control(what)

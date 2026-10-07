@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import Callable
 from functools import wraps
@@ -21,13 +22,18 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.screen import ModalScreen
+from textual.widgets import ContentSwitcher
+from textual.worker import Worker
 
+from pystudio import assistant as ai
 from pystudio import messages as m
+from pystudio.assistant.workspace import AppWorkspace
 from pystudio.interpreter import KernelChoice, candidates, has_ipykernel
 from pystudio.introspect import Variable
-from pystudio.kernel import KernelSession
+from pystudio.kernel import KernelReset, KernelSession
 from pystudio.widgets import (
     PROTOCOL,
+    AssistantPane,
     ConsolePane,
     FrameViewer,
     KernelPicker,
@@ -47,9 +53,16 @@ VIEWABLE_TYPES = {"DataFrame", "Series", "ndarray"}
 
 TWO_DIMENSIONAL = re.compile(r"^\(\d+, \d+\)$")
 
+PROVIDER_VARIABLE = "PYSTUDIO_ASSISTANT"
+"""Names the assistant's provider; see :data:`pystudio.assistant.provider.PROVIDERS`."""
+
+DOCKED = ("console", "assistant")
+"""The panes that share the bottom-left slot, one shown at a time."""
+
 PANE_TITLES = {
     "editor": "editor",
     "console": "console",
+    "assistant": "assistant",
     "variables": "variables",
     "plots": "plots",
 }
@@ -85,6 +98,7 @@ class PyStudioApp(App):
         Binding("2", "chord_focus('console')", "console", priority=True, show=False),
         Binding("3", "chord_focus('variables')", "variables", priority=True, show=False),
         Binding("4", "chord_focus('plots')", "plots", priority=True, show=False),
+        Binding("a", "chord_focus('assistant')", "assistant", priority=True, show=False),
         Binding("z", "chord_zoom", "zoom pane", priority=True, show=False),
         Binding("r", "chord_restart", "restart kernel", priority=True, show=False),
         Binding("i", "chord_interrupt", "interrupt kernel", priority=True, show=False),
@@ -101,6 +115,7 @@ class PyStudioApp(App):
         nvim: str = "nvim",
         kernel_name: str = "python3",
         choice: KernelChoice | None = None,
+        assistant: ai.Provider | None = None,
     ) -> None:
         super().__init__()
         self.path = path
@@ -114,6 +129,10 @@ class PyStudioApp(App):
         self._kernel_ready = False
         self._switching = False
         self._quitting = False
+        self._provider = assistant
+        self._assistant: ai.Assistant | None = None
+        self._asking: Worker[None] | None = None
+        self._running_cells: Worker[None] | None = None
 
     def _session(self, choice: KernelChoice) -> KernelSession:
         return KernelSession(
@@ -135,7 +154,9 @@ class PyStudioApp(App):
                 clean=self.clean,
             )
             yield VariablesPane(id="variables")
-            yield ConsolePane(id="console")
+            with ContentSwitcher(id="dock", initial="console"):
+                yield ConsolePane(id="console")
+                yield AssistantPane(id="assistant")
             yield PlotsPane(id="plots")
         yield StatusBar(kernel_name=self.choice.label, protocol=PROTOCOL, id="status")
 
@@ -173,6 +194,14 @@ class PyStudioApp(App):
         return self.query_one("#console", ConsolePane)
 
     @property
+    def assistant_pane(self) -> AssistantPane:
+        return self.query_one("#assistant", AssistantPane)
+
+    @property
+    def kernel_ready(self) -> bool:
+        return self._kernel_ready
+
+    @property
     def variables(self) -> VariablesPane:
         return self.query_one("#variables", VariablesPane)
 
@@ -208,14 +237,20 @@ class PyStudioApp(App):
         if not self._chord:
             return
         self._chord = False
-        self.status.set_note("")
+        self.status.set_note(self._idle_note())
         self.refresh_bindings()
 
     def action_chord_cancel(self) -> None:
         self.cancel_chord()
 
+    def _idle_note(self) -> str:
+        """What the status bar says when no chord is pending."""
+        return "assistant…" if self._asking is not None else ""
+
     def action_chord_focus(self, pane: str) -> None:
         self.cancel_chord()
+        if pane in DOCKED:
+            self.query_one("#dock", ContentSwitcher).current = pane
         target = self.query_one(f"#{pane}")
         if target.focusable:
             target.focus()
@@ -409,8 +444,79 @@ class PyStudioApp(App):
     def _is_viewable(variable: Variable) -> bool:
         return variable.type in VIEWABLE_TYPES or bool(TWO_DIMENSIONAL.match(variable.shape))
 
+    # -------------------------------------------------------------------- assistant
+
+    def on_assistant_pane_asked(self, message: AssistantPane.Asked) -> None:
+        pane = self.assistant_pane
+        if self._asking is not None:
+            pane.show_note("still working on the last request; escape cancels it")
+            return
+        pane.show_user(message.text)
+        self._asking = self.run_worker(self._ask(message.text), name="assistant")
+        self.status.set_note(self._idle_note())
+
+    def on_assistant_pane_cancelled(self, message: AssistantPane.Cancelled) -> None:
+        if self._asking is not None:
+            self._asking.cancel()
+
+    async def _ask(self, text: str) -> None:
+        try:
+            if self._assistant is None:
+                provider = self._provider or ai.load(os.environ.get(PROVIDER_VARIABLE, "anthropic"))
+                self._assistant = ai.Assistant(provider, AppWorkspace(self), self._shown)
+            await self._assistant.ask(text)
+        except ai.ProviderError as error:
+            self.assistant_pane.show_note(str(error))
+        finally:
+            self._asking = None
+            if self.is_running:
+                self.assistant_pane.end_reply()
+                self.status.set_note("ctrl+g …" if self._chord else "")
+
+    def _shown(self, event: ai.TextDelta | ai.ToolNote | ai.Notice | ai.TurnEnd) -> None:
+        """Put one step of the assistant's turn into the chat."""
+        if not self.is_running:
+            return
+        pane = self.assistant_pane
+        if isinstance(event, ai.TextDelta):
+            pane.stream(event.text)
+        elif isinstance(event, ai.ToolNote | ai.Notice):
+            pane.show_note(event.text)
+        elif event.reason == "refused":
+            pane.show_note("the model declined this request")
+        elif event.reason == "truncated":
+            pane.show_note("the reply was cut off at the length limit; ask it to continue")
+
     def on_nvim_send_request(self, message: m.NvimSendRequest) -> None:
         self._execute("\n".join(message.lines))
+
+    def on_nvim_send_cells(self, message: m.NvimSendCells) -> None:
+        if not self._kernel_ready:
+            self.console_pane.show_note("kernel is still starting…")
+            return
+        if self._running_cells is not None:
+            self.console_pane.show_note("still running cells; ctrl+g i interrupts them")
+            return
+        self._running_cells = self.run_worker(self._run_cells(message.cells), name="cells")
+
+    async def _run_cells(self, cells: list[tuple[int, list[str]]]) -> None:
+        """Run cells one at a time, and stop at the first that does not succeed."""
+        try:
+            for index, (line, lines) in enumerate(cells):
+                try:
+                    status = await self.kernel.run("\n".join(lines))
+                except KernelReset as reason:
+                    self.console_pane.show_note(f"stopped running cells: {reason}")
+                    return
+                if status != "ok":
+                    left = len(cells) - index - 1
+                    after = (
+                        f"; {left} cell{'s' if left != 1 else ''} after it not run" if left else ""
+                    )
+                    self.console_pane.show_note(f"stopped at the cell on line {line}{after}")
+                    return
+        finally:
+            self._running_cells = None
 
     def on_nvim_event(self, message: m.NvimEvent) -> None:
         if message.method == "pystudio_control":

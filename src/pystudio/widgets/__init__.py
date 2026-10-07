@@ -1,5 +1,6 @@
-"""The four panes, the table viewer, the kernel picker and the status bar."""
+"""The panes, the table viewer, the kernel picker and the status bar."""
 
+from pystudio.widgets.assistant import AssistantPane
 from pystudio.widgets.console import ConsolePane
 from pystudio.widgets.frame_viewer import FrameViewer
 from pystudio.widgets.kernel_picker import KernelPicker
@@ -10,6 +11,7 @@ from pystudio.widgets.variables import VariablesPane
 
 __all__ = [
     "PROTOCOL",
+    "AssistantPane",
     "ConsolePane",
     "FrameViewer",
     "KernelPicker",

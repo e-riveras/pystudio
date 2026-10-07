@@ -90,6 +90,43 @@ their history, completion at the prompt, tracebacks, interrupting, restarting
 and replaying, and proving the editor really is your Neovim. A test runs all of
 it, so the tour cannot drift away from the code.
 
+## The assistant
+
+`ctrl+g a` swaps the console for a chat. Ask for code in plain words:
+
+```
+do some EDA on the csv I left at data/sales.csv
+let's fit a linear model of price on area and rooms
+build a Bayesian model for this with MCMC, normal priors on the slopes
+```
+
+The assistant reads the buffer, looks at the data it needs to, and writes the
+code into the editor as `# %%` cells below the cell your cursor is in. It does
+not run them: you do, with the same keys as any other cell. One request is one
+undo step, so `u` in the editor takes back everything it just wrote. `escape`
+at its prompt cancels a reply, and `ctrl+g 2` brings the console back.
+
+To write code that fits your data it may look before it writes: list the
+kernel's variables, evaluate an expression such as `df.dtypes` or `df.head()`,
+read the first lines of a file, or read the end of the console after an error.
+Each of these shows up in the chat as it happens. Inspection is kept out of the
+console and the history, but it is an expression evaluated in your live
+session, not a sandbox, so the chat is where to see what was asked.
+
+It needs credentials for Anthropic's API: set `ANTHROPIC_API_KEY`, or run
+`ant auth login`. Without them pystudio works as before and the chat says what
+is missing. The model is Claude Sonnet 5.5; `PYSTUDIO_ASSISTANT_MODEL` picks
+another. Requests are billed to your account.
+
+What leaves your machine: your request, the buffer's text, and whatever the
+assistant inspects, meaning variable names with short previews, the output of
+the expressions it evaluates, file heads and console text. Nothing is sent
+until you ask it something.
+
+The model sits behind a small interface (`pystudio/assistant/provider.py`), so
+another provider is one module and one entry in `PROVIDERS`, selected with
+`PYSTUDIO_ASSISTANT`. Only Anthropic is implemented.
+
 ## Keys
 
 Neovim owns its whole keyspace, so pystudio's own keys sit behind a `ctrl+g`
@@ -98,6 +135,7 @@ chord. Press `ctrl+g`, then:
 | Key | Action |
 | --- | --- |
 | `1` `2` `3` `4` | focus editor, console, variables, plots |
+| `a` | show the assistant in the console's place; `2` brings the console back |
 | `z` | zoom the focused pane, toggle |
 | `r` | restart the kernel |
 | `i` | interrupt the kernel |
@@ -111,10 +149,15 @@ Inside the editor, under `<localleader>` (`\` unless you set one):
 | --- | --- |
 | `l` | send the current line, or the visual selection, and advance past it |
 | `c` | send the current `# %%` cell, then move to the next one |
-| `f` | send the whole buffer |
-| `a` | send everything above this cell, to replay state after a restart |
+| `f` | send the whole buffer, cell by cell |
+| `a` | send every cell above this one, to replay state after a restart |
 | `e` | send from the cursor to the end of the buffer |
 | `.` | send the last thing again |
+
+`f` and `a` send one cell at a time, wait for each to finish, and stop at the
+first one that fails, saying in the console which cell stopped them. A typo or
+an exception halfway down therefore costs you only the cells after it. Cells
+with nothing but comments are skipped.
 
 If you use a separate `<leader>`, the same six keys are offered there too, so
 `<space>c` works as well as `\c`. A key is skipped when it would collide with a
@@ -183,6 +226,11 @@ statusline.
   `textual-image` with whatever protocol the terminal supports.
 - **Table viewer.** The same quiet-expression trick fetches one page of rows at a
   time, so nothing is loaded that is not on screen.
+- **Assistant.** A loop in `pystudio/assistant/agent.py` sends the request to a
+  provider and runs the tools the model calls: reading the buffer and writing
+  to it over the Neovim RPC channel, and inspecting the kernel with the same
+  quiet expressions the variable explorer uses. No widget is imported there;
+  the app hands it a workspace.
 - **Cursor.** A character cell cannot be subdivided, so a block cursor is drawn
   reversed, a horizontal one underlines its character, and a vertical one becomes
   a thin bar glyph in place of the character.

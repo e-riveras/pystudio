@@ -17,7 +17,7 @@
 #   ctrl+g 2   focus the console       ctrl+g i   interrupt the kernel
 #   ctrl+g 3   focus the variables     ctrl+g r   restart the kernel
 #   ctrl+g 4   focus the plots         ctrl+g q   quit
-#                                      ctrl+g k   pick another kernel
+#   ctrl+g a   ask the assistant       ctrl+g k   pick another kernel
 #
 # Notice the rule drawn above each `# %%` below, and the faint wash over the
 # cell your cursor is in. That wash is exactly what `\c` will send.
@@ -129,10 +129,12 @@ plt.show()
 # %%
 # Cell 9 --- errors.
 #
-# Run it. The traceback keeps IPython's own colours, because the console renders
-# the ANSI the kernel sent rather than re-formatting it.
+# Uncomment and run. The traceback keeps IPython's own colours, because the
+# console renders the ANSI the kernel sent rather than re-formatting it. It stays
+# commented out so that \a and \f, which stop at the first cell that fails, get
+# past it.
 
-sales["nope"].sum()
+# sales["nope"].sum()
 
 # %%
 # Cell 10 --- interrupting. Interactive only.
@@ -161,9 +163,10 @@ sales["nope"].sum()
 #
 # Press ctrl+g r. The kernel restarts and the variables pane empties.
 #
-# Now put the cursor in this cell and press \a. Everything above runs again, in
-# order, and the namespace is back. That is the answer to the usual notebook
-# problem of not knowing what state you are in.
+# Now put the cursor in this cell and press \a. Every cell above runs again, one
+# at a time and in order, and the namespace is back. That is the answer to the
+# usual notebook problem of not knowing what state you are in. If a cell fails,
+# the rest are not run, and the console says which one stopped it.
 #
 # `\.` sends the last thing again, which is handy while editing one line.
 

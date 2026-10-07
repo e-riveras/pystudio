@@ -57,9 +57,8 @@ async def test_every_demo_cell_runs(kernel: KernelSession, recorder: Recorder) -
             errors[index] = error.ename
         figures += sum(1 for display in recorder.of(m.DisplayData) if "image/png" in display.data)
 
-    expected = {index for index, cell in enumerate(source, start=1) if 'sales["nope"]' in cell}
-    assert set(errors) == expected
-    assert set(errors.values()) == {"KeyError"}
+    # Nothing may fail, or replaying the tour with \a or \f would stop part way.
+    assert errors == {}
     assert figures == 2
 
     recorder.clear()

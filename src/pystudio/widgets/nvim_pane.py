@@ -18,6 +18,8 @@ from pystudio.nvim.rpc import NvimRpc
 
 log = logging.getLogger(__name__)
 
+CELL_END = "local _, last = _G.pystudio.cell_range() return last"
+
 UI_OPTIONS = {"rgb": True, "ext_linegrid": True}
 """Only ext_linegrid: Neovim then draws the cmdline, popupmenu, messages and
 tabline as ordinary cells, so this widget needs no special case for any of them."""
@@ -111,6 +113,14 @@ class NvimPane(Widget, can_focus=True):
             lines = params[0] if params else []
             self.post_message(m.NvimSendRequest([str(line) for line in lines]))
             return
+        if method == "pystudio_send_cells":
+            cells = params[0] if params else []
+            self.post_message(
+                m.NvimSendCells(
+                    [(int(cell["line"]), [str(line) for line in cell["lines"]]) for cell in cells]
+                )
+            )
+            return
         self.post_message(m.NvimEvent(method, list(params)))
 
     def _on_exit(self, returncode: int) -> None:
@@ -198,6 +208,24 @@ class NvimPane(Widget, can_focus=True):
         """Expose the kernel state as ``g:pystudio_kernel`` for statuslines."""
         if self.rpc.running:
             self.rpc.notify("nvim_set_var", "pystudio_kernel", state)
+
+    async def snapshot(self) -> tuple[str, list[str], int]:
+        """The current buffer: its file name, its lines, and the cursor's line from 1."""
+        name = await self.rpc.request("nvim_buf_get_name", 0)
+        lines = await self.rpc.request("nvim_buf_get_lines", 0, 0, -1, False)
+        cursor = await self.rpc.request("nvim_win_get_cursor", 0)
+        return str(name), [str(line) for line in lines], int(cursor[0])
+
+    async def cell_end(self) -> int:
+        """The last line, from 1, of the cell holding the cursor."""
+        return int(await self.rpc.request("nvim_exec_lua", CELL_END, []))
+
+    async def set_lines(self, start: int, end: int, lines: list[str]) -> None:
+        """Replace lines ``start`` to ``end``, from 0 and end-exclusive, in one undo step."""
+        await self.rpc.request("nvim_buf_set_lines", 0, start, end, False, lines)
+
+    async def move_cursor(self, line: int) -> None:
+        await self.rpc.request("nvim_win_set_cursor", 0, [line, 0])
 
     async def request_quit(self) -> None:
         """Let Neovim prompt about unsaved buffers, rather than doing it here."""

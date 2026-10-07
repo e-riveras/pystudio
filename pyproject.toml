@@ -26,6 +26,7 @@ classifiers = [
     "Topic :: Text Editors :: Integrated Development Environments (IDE)",
 ]
 dependencies = [
+    "anthropic>=1.12.0",
     "ipykernel>=7.4.0",
     "jupyter-client>=8.10.0",
     "msgpack>=1.2.3",

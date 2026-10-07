@@ -107,6 +107,11 @@ class ConsolePane(Vertical):
     def prompt(self) -> Input:
         return self.query_one("#console-prompt", Input)
 
+    def tail(self, count: int) -> str:
+        """The last ``count`` lines of the transcript, as plain text."""
+        lines = self.log_widget.lines[-count:] if count > 0 else []
+        return "\n".join("".join(segment.text for segment in line) for line in lines)
+
     def write(self, renderable: Text | str) -> None:
         self.log_widget.write(renderable)
 

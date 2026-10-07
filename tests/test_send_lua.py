@@ -70,10 +70,23 @@ async def test_send_cell_in_the_last_cell(nvim: NvimHarness) -> None:
     assert nvim.sent() == [("pystudio_send", [["z = 3"]])]
 
 
-async def test_send_file_sends_every_line(nvim: NvimHarness) -> None:
+def cells(*pairs: tuple[int, list[str]]) -> list:
+    return [{"line": line, "lines": lines} for line, lines in pairs]
+
+
+async def test_send_file_sends_every_cell(nvim: NvimHarness) -> None:
     await fill(nvim, SCRIPT)
     await nvim.rpc.request("nvim_exec_lua", "pystudio.send_file()", [])
-    assert nvim.sent() == [("pystudio_send", [SCRIPT])]
+    expected = cells((1, ["x = 1", "y = 2"]), (4, ["z = 3"]))
+    assert nvim.sent() == [("pystudio_send_cells", [expected])]
+
+
+async def test_send_file_skips_cells_without_code(nvim: NvimHarness) -> None:
+    script = ["import os", "# %% notes", "# only a comment", "", "# %%", "x = 1  # code"]
+    await fill(nvim, script)
+    await nvim.rpc.request("nvim_exec_lua", "pystudio.send_file()", [])
+    expected = cells((1, ["import os"]), (5, ["x = 1  # code"]))
+    assert nvim.sent() == [("pystudio_send_cells", [expected])]
 
 
 async def test_control_commands(nvim: NvimHarness) -> None:
@@ -132,7 +145,16 @@ async def test_upward_selection_advances_past_its_bottom(nvim: NvimHarness) -> N
 async def test_send_above(nvim: NvimHarness) -> None:
     await fill(nvim, SCRIPT, row=5)
     await nvim.rpc.request("nvim_exec_lua", "pystudio.send_above()", [])
-    assert nvim.sent() == [("pystudio_send", [SCRIPT[:3]])]
+    assert nvim.sent() == [("pystudio_send_cells", [cells((1, ["x = 1", "y = 2"]))])]
+
+
+async def test_send_last_repeats_cells(nvim: NvimHarness) -> None:
+    await fill(nvim, SCRIPT, row=5)
+    await nvim.rpc.request("nvim_exec_lua", "pystudio.send_above()", [])
+    sent = nvim.sent()
+    nvim.notifications.clear()
+    await nvim.rpc.request("nvim_exec_lua", "pystudio.send_last()", [])
+    assert nvim.sent() == sent
 
 
 async def test_send_above_sends_nothing_in_the_first_cell(nvim: NvimHarness) -> None:

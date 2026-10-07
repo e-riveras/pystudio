@@ -15,8 +15,17 @@ from PIL import Image as PILImage
 
 from pystudio import messages as m
 from pystudio.app import PyStudioApp
+from pystudio.assistant.provider import TextDelta, ToolCall, TurnEnd
 from pystudio.interpreter import KernelChoice
-from pystudio.widgets import ConsolePane, FrameViewer, KernelPicker, NvimPane, VariablesPane
+from pystudio.widgets import (
+    ConsolePane,
+    FrameViewer,
+    KernelPicker,
+    NvimPane,
+    VariablesPane,
+)
+
+from .conftest import HANG, Scripted
 
 pytestmark = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
 
@@ -310,3 +319,120 @@ async def test_picker_closes_without_switching(tmp_path, monkeypatch) -> None:
         await pilot.press("escape")
         await until(lambda: not isinstance(app.screen, KernelPicker), what="the picker to close")
         assert app.kernel is first
+
+
+async def test_chord_a_shows_the_assistant_and_2_the_console(tmp_path) -> None:
+    app = app_with(tmp_path, assistant=Scripted())
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        assert not app.assistant_pane.display
+
+        await pilot.press("ctrl+g", "a")
+        assert app.assistant_pane.display and not app.console_pane.display
+        assert app.focused is app.assistant_pane.prompt
+
+        await pilot.press("ctrl+g", "2")
+        assert app.console_pane.display and not app.assistant_pane.display
+        assert app.focused is not None and app.focused in app.console_pane.query("*")
+
+
+async def ask(app: PyStudioApp, pilot, text: str) -> None:
+    await pilot.press("ctrl+g", "a")
+    app.assistant_pane.prompt.value = text
+    await pilot.press("enter")
+
+
+async def buffer(app: PyStudioApp) -> list[str]:
+    return (await app.editor.snapshot())[1]
+
+
+async def test_the_assistant_writes_cells_that_one_undo_removes(tmp_path) -> None:
+    cells = [
+        {"title": "Load", "code": "df = 1"},
+        {"title": "Look", "code": "df"},
+    ]
+    provider = Scripted(
+        [ToolCall("t1", "insert_cells", {"cells": cells}), TurnEnd("tools")],
+        [TextDelta("Added two cells."), TurnEnd("done")],
+    )
+    app = app_with(tmp_path, assistant=provider)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        await ask(app, pilot, "load it")
+        await until(lambda: app._asking is None and not provider.turns, what="the turn to end")
+
+        assert await buffer(app) == ["# %% Load", "df = 1", "", "# %% Look", "df"]
+        chat = app.assistant_pane.transcript
+        assert "you  load it" in chat
+        assert "inserted 2 cells" in chat
+        assert "Added two cells." in chat
+        assert app.status.note == ""
+
+        await pilot.press("ctrl+g", "1")
+        await pilot.press("u")
+        await until_async(lambda: buffer(app), [""], what="the undo")
+
+
+async def until_async(read, expected, *, what: str, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if await read() == expected:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{what} never happened within {timeout}s")
+
+
+async def test_the_assistant_inspects_the_real_kernel(tmp_path) -> None:
+    provider = Scripted(
+        [ToolCall("t1", "inspect", {"expression": "answer * 2"}), TurnEnd("tools")],
+        [TurnEnd("done")],
+    )
+    app = app_with(tmp_path, assistant=provider)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a started kernel")
+        app._execute("answer = 21")
+        await until(lambda: "answer" in names(app.variables), what="the variable")
+        await ask(app, pilot, "what is it")
+        await until(lambda: app._asking is None and not provider.turns, what="the turn to end")
+
+        assert provider.sent[1][1][0].text == "42"
+        assert "answer * 2" not in transcript(app), "inspection stays out of the console"
+
+
+async def test_escape_cancels_a_reply(tmp_path) -> None:
+    provider = Scripted([TextDelta("Thinking about"), HANG])
+    app = app_with(tmp_path, assistant=provider)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        await ask(app, pilot, "something slow")
+        await until(lambda: "Thinking about" in app.assistant_pane.transcript, what="a reply")
+        assert app.status.note == "assistant…"
+
+        await pilot.press("escape")
+        await until(lambda: app._asking is None, what="the cancel")
+        assert "cancelled" in app.assistant_pane.transcript
+
+
+async def test_no_credentials_is_a_note_in_the_chat(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PYSTUDIO_ASSISTANT", "nope")
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        await ask(app, pilot, "hello")
+        await until(lambda: app._asking is None, what="the turn to end")
+        assert "unknown assistant provider" in app.assistant_pane.transcript
+
+
+async def test_sending_the_file_runs_cells_and_stops_at_a_failure(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE):
+        await until(lambda: app._kernel_ready, what="a started kernel")
+        script = ["# %%", "first = 1", "# %%", "this is not python", "# %%", "third = 3"]
+        await app.editor.set_lines(0, -1, script)
+        await app.editor.rpc.request("nvim_exec_lua", "pystudio.send_file()", [])
+
+        await until(lambda: "stopped at the cell on line 3" in transcript(app), what="the stop")
+        assert "1 cell after it not run" in transcript(app)
+        await until(lambda: "first" in names(app.variables), what="the first cell's variable")
+        assert "third" not in names(app.variables)
+        assert app._running_cells is None

@@ -190,3 +190,45 @@ async def test_kernel_listens_on_private_sockets_not_tcp(recorder: Recorder, tmp
     finally:
         await session.shutdown()
     assert not sockets.exists()
+
+
+async def test_evaluate_is_quiet(kernel: KernelSession, recorder: Recorder) -> None:
+    await kernel.execute("answer = 41")
+    await recorder.settle()
+
+    assert await kernel.evaluate("answer + 1") == (True, "42")
+    assert recorder.of(m.ExecuteInput) == []
+    assert recorder.of(m.ExecuteResult) == []
+    assert recorder.of(m.KernelStatus) == []
+
+
+async def test_evaluate_reports_the_error(kernel: KernelSession) -> None:
+    ok, text = await kernel.evaluate("missing_name")
+    assert not ok
+    assert "NameError" in text
+
+
+async def test_variables_are_awaited(kernel: KernelSession, recorder: Recorder) -> None:
+    await kernel.execute("answer = 41")
+    await kernel.barrier()
+    assert "answer" in {variable.name for variable in await kernel.variables()}
+
+
+async def test_run_waits_and_reports_the_status(kernel: KernelSession, recorder: Recorder) -> None:
+    assert await kernel.run("import time; time.sleep(0.3); slept = True") == "ok"
+    assert await kernel.evaluate("slept") == (True, "True")
+    assert await kernel.run("1 / 0") == "error"
+    await recorder.wait_for(m.KernelError)
+
+
+async def test_restart_releases_a_waiting_run(kernel: KernelSession) -> None:
+    from pystudio.kernel import KernelReset
+
+    waiting = asyncio.create_task(kernel.run("import time; time.sleep(30)"))
+    await asyncio.sleep(0.3)
+    await kernel.restart()
+    try:
+        await asyncio.wait_for(waiting, 5)
+    except KernelReset:
+        return
+    raise AssertionError("the run was not released")
