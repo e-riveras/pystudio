@@ -235,6 +235,95 @@ async def test_a_restart_leaves_the_figures_viewable(tmp_path) -> None:
         assert app.plots.current.figure_id is None
 
 
+def widths(app: PyStudioApp) -> tuple[int, int]:
+    return app.editor.size.width, app.plots.size.width
+
+
+async def test_the_panes_start_two_to_one(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE):
+        editor, plots = app.editor.region, app.plots.region
+        assert editor.width == pytest.approx(2 * plots.width, abs=2)
+        assert plots.height == pytest.approx(app.variables.region.height, abs=1)
+        assert (plots.x, plots.y) == (editor.right, app.variables.region.bottom)
+
+
+async def test_chord_resizes_until_another_key(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        before = widths(app)
+
+        await pilot.press("ctrl+g", "<", "<", "<")
+        await pilot.pause()
+        narrower = widths(app)
+        assert narrower[0] < before[0] and narrower[1] > before[1]
+
+        # The resize keys are still live, and the other chord keys are not.
+        await pilot.press("q")
+        assert app._resizing is False and app._quitting is False
+        await pilot.press("<")
+        await pilot.pause()
+        assert widths(app) == narrower
+
+
+async def test_chord_grows_the_focused_pane(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        await pilot.press("ctrl+g", "4")
+        plots, editor = app.plots.size.height, app.editor.size.height
+
+        await pilot.press("ctrl+g", "+", "+")
+        await pilot.pause()
+
+        assert app.plots.size.height > plots
+        assert app.variables.size.height < plots
+        assert app.editor.size.height == editor
+
+
+async def test_chord_p_walks_the_layouts(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        tall = app.query_one("#right").size.height
+
+        await pilot.press("ctrl+g", "p")
+        await pilot.pause()
+        assert app.plots.size.width == pytest.approx(app.editor.size.width, abs=1)
+
+        await pilot.press("ctrl+g", "p")
+        await pilot.pause()
+        assert not app.variables.display
+        assert app.plots.outer_size.height == tall
+
+        # Asking for the variables brings them back.
+        await pilot.press("ctrl+g", "3")
+        await pilot.pause()
+        assert isinstance(app.focused, VariablesPane)
+        assert app.variables.size.height > 0
+
+
+async def test_a_border_between_panes_drags(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        edge, top = app.plots.region.x, app.plots.region.y
+
+        await pilot.mouse_down(app.screen, offset=(edge, 3))
+        await pilot.hover(app.screen, offset=(edge - 20, 3))
+        await pilot.mouse_up(app.screen, offset=(edge - 20, 3))
+        await pilot.pause()
+        assert app.plots.region.x == pytest.approx(edge - 20, abs=1)
+
+        middle = app.plots.region.x + 10
+        await pilot.mouse_down(app.screen, offset=(middle, top))
+        await pilot.hover(app.screen, offset=(middle, top - 5))
+        await pilot.mouse_up(app.screen, offset=(middle, top - 5))
+        await pilot.pause()
+        assert app.plots.region.y == pytest.approx(top - 5, abs=1)
+
+
 async def test_tab_completes_at_the_prompt(tmp_path) -> None:
     app = app_with(tmp_path)
     async with app.run_test(size=SIZE) as pilot:

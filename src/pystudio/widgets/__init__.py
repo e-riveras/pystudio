@@ -4,6 +4,7 @@ from pystudio.widgets.assistant import AssistantPane
 from pystudio.widgets.console import ConsolePane
 from pystudio.widgets.frame_viewer import FrameViewer
 from pystudio.widgets.kernel_picker import KernelPicker
+from pystudio.widgets.layout import Panes
 from pystudio.widgets.nvim_pane import NvimPane
 from pystudio.widgets.plots import PROTOCOL, PlotsPane
 from pystudio.widgets.status import StatusBar
@@ -16,6 +17,7 @@ __all__ = [
     "FrameViewer",
     "KernelPicker",
     "NvimPane",
+    "Panes",
     "PlotsPane",
     "StatusBar",
     "VariablesPane",

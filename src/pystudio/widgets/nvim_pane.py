@@ -173,6 +173,9 @@ class NvimPane(Widget, can_focus=True):
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         self.focus()
+        if not self.content_region.contains(event.screen_x, event.screen_y):
+            # The border is a divider to drag, not a place in the buffer.
+            return
         button = mouse_button(event)
         if button:
             self._mouse(event, button, "press")

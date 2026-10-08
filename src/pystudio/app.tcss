@@ -22,16 +22,16 @@ Screen {
 }
 
 #panes {
-    layout: grid;
-    grid-size: 2 2;
-    grid-columns: 2fr 1fr;
-    grid-rows: 1fr 1fr;
     height: 100%;
     width: 1fr;
 }
 
-#dock {
+/* The shares of #left, #right and the panes in them are set by Panes. */
+#left, #right {
     height: 100%;
+}
+
+#dock {
     width: 100%;
 }
 
@@ -39,9 +39,12 @@ Screen {
     border: round $surface-lighten-2;
     border-title-color: $text-muted;
     border-title-align: left;
-    height: 100%;
     width: 100%;
     padding: 0;
+}
+
+#console, #assistant {
+    height: 100%;
 }
 
 #editor:focus, #variables:focus, #plots:focus, #console:focus-within, #assistant:focus-within {

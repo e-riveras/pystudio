@@ -18,9 +18,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher
 from textual.worker import Worker
@@ -40,6 +41,7 @@ from pystudio.widgets import (
     FrameViewer,
     KernelPicker,
     NvimPane,
+    Panes,
     PlotsPane,
     StatusBar,
     VariablesPane,
@@ -60,6 +62,9 @@ TWO_DIMENSIONAL = re.compile(r"^\(\d+, \d+\)$")
 
 ASSISTANT_OFF = "the assistant is off; start pystudio with --assistant"
 AGENT_OFF = "the agent pane is off; start pystudio with --agent"
+
+RESIZE_KEYS = ("less_than_sign", "greater_than_sign", "plus", "equals_sign", "minus")
+RESIZE_NOTE = "resize: < > move the columns, + - the focused pane; any other key ends"
 
 DOCKED = ("console", "assistant")
 """The panes that share the bottom-left slot, one shown at a time."""
@@ -105,6 +110,15 @@ class PyStudioApp(App):
         Binding("4", "chord_focus('plots')", "plots", priority=True, show=False),
         Binding("a", "chord_focus('assistant')", "assistant", priority=True, show=False),
         Binding("z", "chord_zoom", "zoom pane", priority=True, show=False),
+        Binding("p", "chord_preset", "next layout", priority=True, show=False),
+        Binding(
+            "less_than_sign", "chord_resize('columns', -1)", "narrower", priority=True, show=False
+        ),
+        Binding(
+            "greater_than_sign", "chord_resize('columns', 1)", "wider", priority=True, show=False
+        ),
+        Binding("plus,equals_sign", "chord_resize('rows', 1)", "taller", priority=True, show=False),
+        Binding("minus", "chord_resize('rows', -1)", "shorter", priority=True, show=False),
         Binding("r", "chord_restart", "restart kernel", priority=True, show=False),
         Binding("i", "chord_interrupt", "interrupt kernel", priority=True, show=False),
         Binding("k", "chord_kernels", "switch kernel", priority=True, show=False),
@@ -137,6 +151,7 @@ class PyStudioApp(App):
         self.cwd = path.parent if path is not None else Path.cwd()
         self.kernel = self._session(self.choice)
         self._chord = False
+        self._resizing = False
         self._probe_timer = None
         self._kernel_ready = False
         self._switching = False
@@ -170,19 +185,21 @@ class PyStudioApp(App):
         yield StatusBar(kernel_name=self.choice.label, protocol=PROTOCOL, id="status")
 
     def _panes(self) -> ComposeResult:
-        with Container(id="panes"):
-            yield NvimPane(
-                id="editor",
-                executable=self.nvim_executable,
-                file=self.path,
-                clean=self.clean,
-            )
-            yield VariablesPane(id="variables")
-            with ContentSwitcher(id="dock", initial="console"):
-                yield ConsolePane(id="console")
-                if self._provider is not None:
-                    yield AssistantPane(id="assistant")
-            yield PlotsPane(id="plots")
+        with Panes(id="panes"):
+            with Vertical(id="left"):
+                yield NvimPane(
+                    id="editor",
+                    executable=self.nvim_executable,
+                    file=self.path,
+                    clean=self.clean,
+                )
+                with ContentSwitcher(id="dock", initial="console"):
+                    yield ConsolePane(id="console")
+                    if self._provider is not None:
+                        yield AssistantPane(id="assistant")
+            with Vertical(id="right"):
+                yield VariablesPane(id="variables")
+                yield PlotsPane(id="plots")
 
     def on_mount(self) -> None:
         for pane_id, title in PANE_TITLES.items():
@@ -245,6 +262,10 @@ class PyStudioApp(App):
         return self.query_one("#plots", PlotsPane)
 
     @property
+    def panes(self) -> Panes:
+        return self.query_one("#panes", Panes)
+
+    @property
     def status(self) -> StatusBar:
         return self.query_one("#status", StatusBar)
 
@@ -253,6 +274,8 @@ class PyStudioApp(App):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action == "start_chord":
             return not self._chord
+        if action in ("chord_resize", "chord_cancel"):
+            return self._chord or self._resizing
         if action.startswith("chord_"):
             return self._chord
         return True
@@ -260,18 +283,31 @@ class PyStudioApp(App):
     @property
     def chord_pending(self) -> bool:
         """Whether ``ctrl+g`` was pressed and the next key belongs to the chord."""
-        return self._chord
+        return self._chord or self._resizing
+
+    async def on_event(self, event: events.Event) -> None:
+        # Resizing takes several presses, so its keys stay live after the first.
+        # Any other key ends that, and then does what it always does.
+        if (
+            self._resizing
+            and isinstance(event, events.Key)
+            and event.key not in RESIZE_KEYS
+            and event.key != "escape"
+        ):
+            self.cancel_chord()
+        await super().on_event(event)
 
     def action_start_chord(self) -> None:
         self._chord = True
+        self._resizing = False
         self.status.set_note("ctrl+g …")
         self.refresh_bindings()
 
     def cancel_chord(self) -> None:
         """Called by the editor pane whenever a key gets through to Neovim."""
-        if not self._chord:
+        if not self._chord and not self._resizing:
             return
-        self._chord = False
+        self._chord = self._resizing = False
         self.status.set_note(self._idle_note())
         self.refresh_bindings()
 
@@ -290,6 +326,8 @@ class PyStudioApp(App):
         if pane in DOCKED:
             self.query_one("#dock", ContentSwitcher).current = pane
         target = self.query_one(f"#{pane}")
+        # A layout may have put the pane away.
+        target.display = True
         if target.focusable:
             target.focus()
             return
@@ -306,6 +344,30 @@ class PyStudioApp(App):
             screen.minimize()
         elif self.focused is not None:
             screen.maximize(self.focused)
+
+    def action_chord_resize(self, which: str, steps: int) -> None:
+        """Move a divider, and keep the resize keys live for the next press.
+
+        ``columns`` moves the divider between the columns. ``rows`` grows or
+        shrinks the focused pane within its column.
+        """
+        self._chord = False
+        self._resizing = True
+        self.status.set_note(RESIZE_NOTE)
+        self.refresh_bindings()
+        if self.screen.maximized is not None:
+            return
+        if which == "rows":
+            which, top = self.panes.place(self.focused)
+            steps = steps if top else -steps
+        self.panes.nudge(which, steps)
+
+    def action_chord_preset(self) -> None:
+        self.cancel_chord()
+        hidden = self.focused is not None and self.focused.id == "variables"
+        self.status.set_note(f"layout: {self.panes.cycle()}")
+        if hidden and not self.variables.display:
+            self.plots.focus()
 
     def action_chord_interrupt(self) -> None:
         self.cancel_chord()

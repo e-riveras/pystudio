@@ -458,7 +458,8 @@ class PlotsPane(Vertical):
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         self.focus()
-        if self._viewport.zoom > 1.0:
+        # Outside the stage is the border, which is a divider to drag.
+        if self._viewport.zoom > 1.0 and self.stage.region.contains(event.screen_x, event.screen_y):
             self._drag = (event.screen_x, event.screen_y)
             self.capture_mouse()
 
