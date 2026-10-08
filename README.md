@@ -3,15 +3,7 @@
 A terminal IDE for Python data science: a mix of RStudio and Jupyter, with a real
 Neovim as the editor.
 
-```
-┌ editor (nvim) ────────────┬ variables ─────────┐
-│ df = pd.read_csv("a.csv") │ df  DataFrame      │
-│ df.head()                 │     (1000, 12)     │
-├ console ──────────────────┼ plots ─────────────┤
-│ In [1]: df.head()         │  ▁▂▄▆█▆▄▂▁  3/7    │
-└───────────────────────────┴────────────────────┘
- kernel: idle · python3 · analysis.py · tgp
-```
+![pystudio: the editor and the console on the left, variables and a plot on the right](docs/screenshot.png)
 
 Four panes, one Jupyter kernel, one screen. Works over SSH, no browser.
 
@@ -40,6 +32,9 @@ pystudio analysis.py
 
 Each [release](https://github.com/e-riveras/pystudio/releases) also has a wheel
 attached, which `uv tool install` or `pipx install` take as a path.
+
+To look around first, take [the guided tour](#the-guided-tour):
+`pystudio --demo`.
 
 pystudio has two AI features, and both are off by default: nothing is sent
 anywhere, no agent is started, and their dependencies are not installed. To
@@ -95,19 +90,29 @@ leaves it running on exit.
 ## The guided tour
 
 ```sh
-just demo
+pystudio --demo
 ```
 
-[`examples/demo.py`](examples/demo.py) walks through every feature in fourteen
-cells, each one saying which key to press and what should happen: sending lines
-and cells, the variable explorer, the table viewer and its paging, plots and
-their history, completion at the prompt, tracebacks, interrupting, restarting
-and replaying, and proving the editor really is your Neovim. A test runs all of
-it, so the tour cannot drift away from the code.
+The tour comes with the install. It is a script of sixteen cells, each saying
+which key to press and what should happen: sending lines and cells, the variable
+explorer, the table viewer and its paging, plots with their zoom, history and
+export, resizing the panes, completion at the prompt, tracebacks, interrupting,
+restarting and replaying, and proving the editor really is your Neovim. It is
+where the keys are documented. A test runs all of it, so it cannot drift away
+from the code.
 
-[`examples/plots.py`](examples/plots.py) does the same for the plot pane alone:
-zooming, filling the screen, layouts, the gallery, Altair charts and saving.
-Open it with `uv run pystudio examples/plots.py`.
+`--demo` writes a copy, `pystudio_demo.py`, into the directory you are in and
+opens it, so you can edit it; a copy already there is kept. The tour imports
+numpy, pandas and matplotlib, which have to be where
+[the kernel runs](#which-python-runs-your-code). Run it from a project that has
+them, or install pystudio with them:
+
+```sh
+uv tool install "pystudio-tui[demo] @ git+https://github.com/e-riveras/pystudio"
+```
+
+In a checkout, [`examples/plots.py`](examples/plots.py) goes further into the
+plot pane: layouts, the gallery, Altair charts, output updated in place.
 
 ## The assistant
 
@@ -160,14 +165,6 @@ you already have, and its slash commands, prompts and permission questions are
 the ones you know. `ctrl+g c` from inside the column hides it and leaves the
 agent running; `ctrl+g 1` goes back to the editor with the column still open.
 
-```
-┌ agent: claude ───┬ editor (nvim) ──────┬ variables ┐
-│ > add a cell     │ # %% fit            │ df  ...   │
-│ ● Edit(a.py)     │ model = ...         ├ plots ────┤
-│                  ├ console ────────────┤           │
-└──────────────────┴─────────────────────┴───────────┘
-```
-
 Two things make it part of the IDE rather than a terminal beside it:
 
 - **Its edits are live.** The editor watches the files it has open and reloads
@@ -204,99 +201,32 @@ sending. The mouse wheel scrolls back, and any key returns to the present.
 ## Keys
 
 Neovim owns its whole keyspace, so pystudio's own keys sit behind a `ctrl+g`
-chord. Press `ctrl+g`, then:
+chord: `ctrl+g 1` to `4` move between the panes, `ctrl+g r` restarts the kernel,
+`ctrl+g q` quits. In the editor, `<localleader>l` sends a line and
+`<localleader>c` a `# %%` cell (`\` unless you set a localleader). The rest, pane
+by pane, is in [the guided tour](#the-guided-tour). What the tour does not say:
 
-| Key | Action |
-| --- | --- |
-| `1` `2` `3` `4` | focus editor, console, variables, plots |
-| `a` | show the assistant in the console's place; `2` brings the console back |
-| `c` | open the coding agent column and focus it; from inside it, hide it |
-| `z` | zoom the focused pane, toggle |
-| `<` `>` | move the divider between the two columns |
-| `+` `-` | grow or shrink the focused pane within its column |
-| `p` | next layout: default, wide plots, plots only |
-| `r` | restart the kernel |
-| `i` | interrupt the kernel |
-| `k` | pick another kernel |
-| `q` | quit (Neovim prompts about unsaved buffers) |
-| `escape` | cancel the chord |
-
-Inside the editor, under `<localleader>` (`\` unless you set one):
-
-| Key | Action |
-| --- | --- |
-| `l` | send the current line, or the visual selection, and advance past it |
-| `c` | send the current `# %%` cell, then move to the next one |
-| `f` | send the whole buffer, cell by cell |
-| `a` | send every cell above this one, to replay state after a restart |
-| `e` | send from the cursor to the end of the buffer |
-| `.` | send the last thing again |
-
-`f` and `a` send one cell at a time, wait for each to finish, and stop at the
-first one that fails, saying in the console which cell stopped them. A typo or
-an exception halfway down therefore costs you only the cells after it. Cells
-with nothing but comments are skipped.
-
-If you use a separate `<leader>`, the same six keys are offered there too, so
-`<space>c` works as well as `\c`. A key is skipped when it would collide with a
-mapping you already have — including as a prefix, so pystudio will not take
-`<leader>f` out from under your own `<leader>ff`. What it mapped and what it
-skipped are in `g:pystudio_keys` and `g:pystudio_keys_skipped`.
-
-The same actions are available as `:PyStudioSend`, `:PyStudioSendCell`,
-`:PyStudioSendFile`, `:PyStudioSendAbove`, `:PyStudioSendToEnd`,
-`:PyStudioSendLast`, `:PyStudioInterrupt` and `:PyStudioRestart`. `<C-CR>` is
-bound to send-line too, for terminals that can tell it apart from `Enter`.
-
-Cells are drawn: a rule above each marker, and a faint wash over the cell the
-cursor is in, so what `c` will send is visible before you press it. Both come
-from the `PyStudioCellBorder` and `PyStudioCell` highlight groups, which link to
-`Comment` and `CursorLine` by default and can be overridden in your config.
-
-At the console prompt, `Tab` completes through the kernel, `up` and `down` walk
-the history, and an empty line ends an unfinished block.
-
-`<` `>` `+` `-` stay live after the first press, so `ctrl+g < < <` moves the
-divider three steps; any other key ends that. The borders between panes also
-drag with the mouse.
-
-In the plot pane:
-
-| Key | Action |
-| --- | --- |
-| `+` `-` `0` | zoom in, zoom out, fit the pane again |
-| `h` `j` `k` `l`, arrows | pan while zoomed in |
-| `f`, `enter` | fill the screen with the pane, toggle |
-| `a` | lay the figure out for the pane instead of at its own size, toggle |
-| `[` `]` | previous and next figure |
-| `g` | every figure as thumbnails: `enter` shows one, `d` deletes it |
-| `d` `D` | delete this figure, delete all of them |
-| `o` | open it in the desktop's image viewer, or the browser |
-| `y` | copy it to the clipboard as an image |
-| `ctrl+s` `S` `P` | save as PNG, SVG, PDF in the working directory |
-
-The mouse wheel zooms at the pointer, a drag pans, and a double click fills the
-screen.
-
-A matplotlib figure is drawn at the pane's real resolution, and drawn again by
-the kernel when you zoom, pan or resize, so zooming in shows more detail rather
-than bigger pixels. The kernel keeps the last 20 figures for that; older ones,
-and any figure after a kernel restart, zoom as plain pictures. `S` and `P` need
-a figure the kernel still holds.
-
-Plotly figures and Altair charts without the PNG renderer are interactive pages,
-which a terminal cannot draw. They get an entry in the history, and `o` opens
-them in the browser.
-
-In the variables pane, `enter` opens a DataFrame, Series or array in a scrollable
-table, and prints anything else to the console. In that table, `s` sorts by the
-column under the cursor (pressing it again reverses), clicking a header does the
-same, and `escape` closes it. Rows are fetched a page at a time and sorting
-happens in the kernel, so a million-row frame opens as fast as a small one.
-
-Your Neovim can see pystudio: `vim.g.pystudio` is true, and
-`vim.g.pystudio_kernel` holds `idle`, `busy`, `restarting` or `dead` for a
-statusline.
+- If you use a separate `<leader>`, the send keys are offered there too, so
+  `<space>c` works as well as `\c`. A key is skipped when it would collide with
+  a mapping you already have, including as a prefix, so pystudio will not take
+  `<leader>f` out from under your own `<leader>ff`. What it mapped and what it
+  skipped are in `g:pystudio_keys` and `g:pystudio_keys_skipped`.
+- The same actions are available as `:PyStudioSend`, `:PyStudioSendCell`,
+  `:PyStudioSendFile`, `:PyStudioSendAbove`, `:PyStudioSendToEnd`,
+  `:PyStudioSendLast`, `:PyStudioInterrupt` and `:PyStudioRestart`. `<C-CR>` is
+  bound to send-line too, for terminals that can tell it apart from `Enter`.
+- The rule above each cell and the wash over the current one come from the
+  `PyStudioCellBorder` and `PyStudioCell` highlight groups, which link to
+  `Comment` and `CursorLine` by default and can be overridden in your config.
+- Your Neovim can see pystudio: `vim.g.pystudio` is true, and
+  `vim.g.pystudio_kernel` holds `idle`, `busy`, `restarting` or `dead` for a
+  statusline.
+- The kernel keeps the last 20 matplotlib figures to draw them again when you
+  zoom. Older ones, and any figure after a kernel restart, zoom as plain
+  pictures, and cannot be saved as SVG or PDF.
+- Plotly figures and Altair charts without the PNG renderer are interactive
+  pages, which a terminal cannot draw. They get an entry in the plot history,
+  and `o` opens them in the browser.
 
 ## How it works
 

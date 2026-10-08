@@ -10,6 +10,8 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `pystudio --demo` opens the guided tour, which now comes with the install.
+  The `[demo]` extra installs what it imports.
 - The plot pane zooms and pans, by key and with the mouse, and `f` or a double
   click fills the screen with it.
 - matplotlib figures are drawn at the pane's resolution, and drawn again by the

@@ -69,6 +69,12 @@ pystudio = "pystudio.__main__:main"
 #   uv tool install "pystudio-tui[ai] @ git+https://github.com/e-riveras/pystudio"
 [project.optional-dependencies]
 ai = ["pystudio-tui[assistant,agent]"]
+# What the guided tour, `pystudio --demo`, imports.
+demo = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+]
 assistant = [
     "anthropic>=1.12.1",
 ]
@@ -84,6 +90,8 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+# The tour is a cell script: imports where a cell needs them, names left behind.
+extend-exclude = ["src/pystudio/examples"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

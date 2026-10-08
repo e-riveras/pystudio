@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import stat
+import sys
+from pathlib import Path
 
 import pytest
 
-from pystudio.__main__ import main, nvim_version
+from pystudio.__main__ import demo_problem, main, nvim_version
 
 
 def fake_nvim(tmp_path, version_line: str) -> str:
@@ -99,3 +101,25 @@ def test_a_missing_extra_says_how_to_install_it(tmp_path, capsys, monkeypatch):
     nvim = fake_nvim(tmp_path, "NVIM v0.12.5")
     assert main(["--nvim", nvim, "--agent"]) == 1
     assert "pystudio-tui[agent]" in capsys.readouterr().err
+
+
+def test_demo_opens_a_copy_of_the_tour(started, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    built = started("--demo")
+    assert built["path"] == tmp_path / "pystudio_demo.py"
+    assert "pystudio guided tour" in built["path"].read_text()
+
+
+def test_demo_keeps_a_copy_that_was_edited(started, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pystudio_demo.py").write_text("mine = 1\n")
+    assert started("--demo")["path"].read_text() == "mine = 1\n"
+
+
+def test_demo_says_what_the_interpreter_lacks(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bare = tmp_path / "python"
+    bare.write_text("#!/bin/sh\nexit 1\n")
+    bare.chmod(bare.stat().st_mode | stat.S_IEXEC)
+    assert demo_problem(bare) is not None and "pystudio-tui[demo]" in demo_problem(bare)
+    assert demo_problem(Path(sys.executable)) is None

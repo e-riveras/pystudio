@@ -12,6 +12,37 @@ from pathlib import Path
 
 MIN_NVIM = (0, 10)
 
+DEMO_NAME = "pystudio_demo.py"
+DEMO_NEEDS = ("numpy", "pandas", "matplotlib")
+"""What the guided tour imports, which the kernel's interpreter has to have."""
+
+
+def write_demo(directory: Path) -> Path:
+    """Put the guided tour in ``directory``, keeping a copy that is already there."""
+    from importlib.resources import files
+
+    target = directory / DEMO_NAME
+    if not target.exists():
+        source = files("pystudio").joinpath("examples", "demo.py")
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return target
+
+
+def demo_problem(python: Path) -> str | None:
+    """What the tour is missing in the kernel's interpreter, or None when it is all there."""
+    check = "; ".join(f"import {module}" for module in DEMO_NEEDS)
+    try:
+        done = subprocess.run([str(python), "-c", check], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode == 0:
+        return None
+    return (
+        f"the tour needs {', '.join(DEMO_NEEDS)}, and {python} lacks some of them. "
+        "Run it from a project that has them, or install pystudio with them: "
+        'uv tool install "pystudio-tui[demo] @ git+https://github.com/e-riveras/pystudio"'
+    )
+
 
 def nvim_version(nvim: str) -> tuple[int, int] | None:
     """Major and minor of ``nvim --version``, or None if it cannot be read."""
@@ -30,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         "variables and plots in one screen.",
     )
     parser.add_argument("file", nargs="?", type=Path, help="script to open in the editor")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help=f"open the guided tour, a copy of which is written to ./{DEMO_NAME}",
+    )
     parser.add_argument("--clean", action="store_true", help="start Neovim without your own config")
     parser.add_argument("--nvim", default="nvim", help="path to the Neovim executable")
     parser.add_argument(
@@ -128,12 +164,24 @@ def main(argv: list[str] | None = None) -> int:
 
     from pystudio.interpreter import InterpreterError, resolve
 
+    if args.demo:
+        if args.file is not None:
+            print("pystudio: --demo opens the tour, so it takes no file", file=sys.stderr)
+            return 1
+        args.file = write_demo(Path.cwd())
+
     start = args.file.parent if args.file is not None else Path.cwd()
     try:
         choice = resolve(python=args.python, kernel_name=args.kernel, start=start)
     except InterpreterError as error:
         print(f"pystudio: {error}", file=sys.stderr)
         return 1
+
+    if args.demo and choice.python is not None:
+        problem = demo_problem(choice.python)
+        if problem is not None:
+            print(f"pystudio: {problem}", file=sys.stderr)
+            return 1
 
     from pystudio.app import PyStudioApp
 

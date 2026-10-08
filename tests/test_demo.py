@@ -10,7 +10,7 @@ from pystudio.kernel import KernelSession
 
 from .conftest import Recorder
 
-DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo.py"
+DEMO = Path(__file__).resolve().parents[1] / "src" / "pystudio" / "examples" / "demo.py"
 MARKER = re.compile(r"^\s*#\s*%%")
 
 
@@ -27,7 +27,7 @@ def cells(source: str) -> list[str]:
 
 def test_the_demo_is_made_of_cells() -> None:
     found = cells(DEMO.read_text(encoding="utf-8"))
-    assert len(found) == 14
+    assert len(found) == 16
     # The interactive cells must stay commented out, or running the tour
     # unattended would block on input() or spin forever.
     live = [
@@ -59,7 +59,7 @@ async def test_every_demo_cell_runs(kernel: KernelSession, recorder: Recorder) -
 
     # Nothing may fail, or replaying the tour with \a or \f would stop part way.
     assert errors == {}
-    assert figures == 2
+    assert figures == 3
 
     recorder.clear()
     await kernel.probe_variables()

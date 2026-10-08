@@ -2165,6 +2165,11 @@ ai = [
 assistant = [
     { name = "anthropic" },
 ]
+demo = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -2187,14 +2192,17 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'assistant'", specifier = ">=1.12.1" },
     { name = "ipykernel", specifier = ">=7.4.0" },
     { name = "jupyter-client", specifier = ">=8.10.0" },
+    { name = "matplotlib", marker = "extra == 'demo'", specifier = ">=3.11.2" },
     { name = "mcp", marker = "extra == 'agent'", specifier = ">=2.3.0" },
     { name = "msgpack", specifier = ">=1.2.3" },
+    { name = "numpy", marker = "extra == 'demo'", specifier = ">=2.5.3" },
+    { name = "pandas", marker = "extra == 'demo'", specifier = ">=3.0.6" },
     { name = "pystudio-tui", extras = ["assistant", "agent"], marker = "extra == 'ai'" },
     { name = "pyte", marker = "extra == 'agent'", specifier = ">=0.8.2" },
     { name = "textual", specifier = ">=8.2.8" },
     { name = "textual-image", specifier = ">=0.14.1" },
 ]
-provides-extras = ["ai", "assistant", "agent"]
+provides-extras = ["ai", "demo", "assistant", "agent"]
 
 [package.metadata.requires-dev]
 dev = [
