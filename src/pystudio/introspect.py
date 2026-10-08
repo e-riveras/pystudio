@@ -279,6 +279,15 @@ def __pystudio_render__(key, room, window, size=None, fmt="png"):
     return _base64.b64encode(__pystudio_draw__(_figure, room, window, size, fmt)).decode("ascii")
 
 
+def __pystudio_forget__(keys=None):
+    """Let go of kept figures, all of them without ``keys``. Defined by pystudio."""
+    if keys is None:
+        __pystudio_figures__.clear()
+    for _key in keys or ():
+        __pystudio_figures__.pop(_key, None)
+    return ""
+
+
 try:
     from matplotlib.figure import Figure as _Figure
 
@@ -311,6 +320,12 @@ def frame_expr(
 def view_expr(width: int, height: int) -> str:
     """The expression that tells the kernel how big the plot pane is, in pixels."""
     return f"__pystudio_view__({int(width)}, {int(height)})"
+
+
+def forget_expr(figures: list[int] | None) -> str:
+    """The expression that drops kept figures, all of them for ``None``."""
+    keys = None if figures is None else [int(figure) for figure in figures]
+    return f"__pystudio_forget__({keys!r})"
 
 
 def render_expr(

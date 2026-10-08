@@ -208,6 +208,9 @@ chord. Press `ctrl+g`, then:
 | `a` | show the assistant in the console's place; `2` brings the console back |
 | `c` | open the coding agent column and focus it; from inside it, hide it |
 | `z` | zoom the focused pane, toggle |
+| `<` `>` | move the divider between the two columns |
+| `+` `-` | grow or shrink the focused pane within its column |
+| `p` | next layout: default, wide plots, plots only |
 | `r` | restart the kernel |
 | `i` | interrupt the kernel |
 | `k` | pick another kernel |
@@ -249,8 +252,37 @@ from the `PyStudioCellBorder` and `PyStudioCell` highlight groups, which link to
 At the console prompt, `Tab` completes through the kernel, `up` and `down` walk
 the history, and an empty line ends an unfinished block.
 
-In the plot pane, `[` and `]` step through the history and `ctrl+s` saves the
-current figure.
+`<` `>` `+` `-` stay live after the first press, so `ctrl+g < < <` moves the
+divider three steps; any other key ends that. The borders between panes also
+drag with the mouse.
+
+In the plot pane:
+
+| Key | Action |
+| --- | --- |
+| `+` `-` `0` | zoom in, zoom out, fit the pane again |
+| `h` `j` `k` `l`, arrows | pan while zoomed in |
+| `f`, `enter` | fill the screen with the pane, toggle |
+| `a` | lay the figure out for the pane instead of at its own size, toggle |
+| `[` `]` | previous and next figure |
+| `g` | every figure as thumbnails: `enter` shows one, `d` deletes it |
+| `d` `D` | delete this figure, delete all of them |
+| `o` | open it in the desktop's image viewer, or the browser |
+| `y` | copy it to the clipboard as an image |
+| `ctrl+s` `S` `P` | save as PNG, SVG, PDF in the working directory |
+
+The mouse wheel zooms at the pointer, a drag pans, and a double click fills the
+screen.
+
+A matplotlib figure is drawn at the pane's real resolution, and drawn again by
+the kernel when you zoom, pan or resize, so zooming in shows more detail rather
+than bigger pixels. The kernel keeps the last 20 figures for that; older ones,
+and any figure after a kernel restart, zoom as plain pictures. `S` and `P` need
+a figure the kernel still holds.
+
+Plotly figures and Altair charts without the PNG renderer are interactive pages,
+which a terminal cannot draw. They get an entry in the history, and `o` opens
+them in the browser.
 
 In the variables pane, `enter` opens a DataFrame, Series or array in a scrollable
 table, and prints anything else to the console. In that table, `s` sorts by the
@@ -294,7 +326,12 @@ statusline.
   added to the kernel's history and nothing is published for the console to
   print.
 - **Plots.** `image/png` from `display_data` goes to the plot pane, rendered by
-  `textual-image` with whatever protocol the terminal supports.
+  `textual-image` with whatever protocol the terminal supports. The setup cell
+  replaces IPython's PNG formatter for matplotlib figures with one that keeps
+  the figure and tags the output with its id. The pane crops the picture it has
+  to answer a zoom at once, then asks for that region through a quiet expression
+  that calls `savefig` with `bbox_inches` set to it, so only what is visible is
+  rendered.
 - **Table viewer.** The same quiet-expression trick fetches one page of rows at a
   time, so nothing is loaded that is not on screen.
 - **Assistant.** A loop in `pystudio/assistant/agent.py` sends the request to a

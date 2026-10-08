@@ -8,6 +8,17 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- The plot pane zooms and pans, by key and with the mouse, and `f` or a double
+  click fills the screen with it.
+- matplotlib figures are drawn at the pane's resolution, and drawn again by the
+  kernel on zoom, pan and resize, so a zoomed plot gains detail. `a` lays the
+  figure out for the pane instead of keeping the size it was made at.
+- Panes resize: `ctrl+g` then `<` `>` `+` `-`, or drag a border. `ctrl+g p`
+  switches between three layouts.
+- A plot gallery on `g`, with delete; `o` opens a figure outside pystudio, `y`
+  copies it, and `S` and `P` save it as SVG and PDF.
+- Plotly figures and Altair charts get an entry in the plot history that opens
+  in the browser.
 - The kernel runs in your project's environment: `$VIRTUAL_ENV`, or the nearest
   `.venv` above the opened file, when it has `ipykernel`. Otherwise pystudio
   falls back to its own Python and says how to fix it. The status bar names

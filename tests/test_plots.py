@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 from PIL import Image as PILImage
 from textual.app import App
 
-from pystudio.widgets.plots import MAX_ZOOM, RENDER_DELAY, WHOLE, PlotsPane, Viewport
+from pystudio.widgets import plots as plots_module
+from pystudio.widgets.plot_gallery import PlotGallery
+from pystudio.widgets.plots import MAX_ZOOM, RENDER_DELAY, WHOLE, PlotsPane, Viewport, page_of
 
 FIGURE = (640.0, 480.0)
 PANE = (400.0, 400.0)
@@ -24,12 +27,20 @@ class PlotsApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.requests: list[PlotsPane.RenderRequested] = []
+        self.forgotten: list[list[int] | None] = []
+        self.exports: list[PlotsPane.ExportRequested] = []
 
     def compose(self):
         yield PlotsPane(id="plots")
 
     def on_plots_pane_render_requested(self, message: PlotsPane.RenderRequested) -> None:
         self.requests.append(message)
+
+    def on_plots_pane_forgotten(self, message: PlotsPane.Forgotten) -> None:
+        self.forgotten.append(message.figures)
+
+    def on_plots_pane_export_requested(self, message: PlotsPane.ExportRequested) -> None:
+        self.exports.append(message)
 
     @property
     def plots(self) -> PlotsPane:
@@ -262,3 +273,120 @@ async def test_a_detached_figure_still_zooms() -> None:
 
         assert plots.viewport.zoom > 1.0
         assert app.requests == []
+
+
+# --------------------------------------------------------------------- the history
+
+
+async def test_d_deletes_and_shift_d_clears() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add(png(), figure_id=1)
+        plots.add(png(), figure_id=2)
+        plots.add(png())
+        plots.focus()
+
+        await pilot.press("[", "d")
+        assert plots.count == 2
+        assert app.forgotten == [[2]]
+        assert str(plots.caption.content).startswith("2/2")
+
+        await pilot.press("D")
+        assert plots.count == 0
+        assert app.forgotten == [[2], None]
+        assert str(plots.caption.content) == "no plots yet"
+        assert not plots.image_widget.display
+
+
+async def test_an_update_takes_the_place_of_the_figure_it_names() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)):
+        plots = app.plots
+        plots.add(png(), display_id="live")
+        plots.add(png())
+
+        plots.add(png(colour="blue"), display_id="live", update=True)
+
+        assert plots.count == 2
+        assert plots.figures[0].png == png(colour="blue")
+        assert str(plots.caption.content).startswith("2/2")
+
+
+async def test_an_interactive_figure_opens_in_the_browser(monkeypatch) -> None:
+    opened: list[Path] = []
+    monkeypatch.setattr(plots_module, "launch", lambda path: opened.append(path) or True)
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add_page("<div></div><script>draw()</script>")
+        plots.focus()
+        await pilot.pause()
+
+        assert "interactive" in str(plots.caption.content)
+        assert plots.query_one("#plot-note").display
+
+        # There is no picture to zoom, and that is not an error.
+        await pilot.press("+", "l", "o")
+        (page,) = opened
+        assert page.suffix == ".html" and "draw()" in page.read_text()
+
+
+def test_only_output_with_a_script_counts_as_a_figure() -> None:
+    assert page_of({"text/html": "<table><tr><td>1</td></tr></table>"}) is None
+    assert page_of({"text/plain": "3"}) is None
+    assert page_of({"text/html": "<div id='v'></div><script>embed()</script>"}) is not None
+
+    page = page_of({plots_module.PLOTLY: {"data": [{"y": [1, 2]}], "layout": {}}})
+    assert page is not None and '"y": [1, 2]' in page and "Plotly.newPlot" in page
+
+
+async def test_ctrl_s_saves_what_is_shown(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.plots.add(png())
+        app.plots.focus()
+        await pilot.press("ctrl+s")
+
+        (saved,) = tmp_path.glob("plot-*.png")
+        assert saved.read_bytes() == png()
+
+
+async def test_a_vector_is_asked_of_the_kernel_only_when_it_has_the_figure() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add(png())
+        plots.add(png(plots.room), figure_id=4)
+        plots.focus()
+
+        await pilot.press("S")
+        await pilot.pause()
+        assert [(request.figure, request.fmt) for request in app.exports] == [(4, "svg")]
+
+        await pilot.press("[", "P")
+        await pilot.pause()
+        assert len(app.exports) == 1
+        assert "pdf" in str(plots.caption.content)
+
+
+async def test_the_gallery_picks_and_deletes() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        plots = app.plots
+        for colour in ("red", "green", "blue"):
+            plots.add(png(colour=colour))
+        plots.focus()
+
+        await pilot.press("g")
+        gallery = app.screen
+        assert isinstance(gallery, PlotGallery) and gallery.cursor == 2
+
+        await pilot.press("h", "d")
+        assert plots.count == 2
+        assert [figure.png for figure in plots.figures] == [png(colour="red"), png(colour="blue")]
+
+        await pilot.press("h", "enter")
+        assert not isinstance(app.screen, PlotGallery)
+        assert str(plots.caption.content).startswith("1/2")

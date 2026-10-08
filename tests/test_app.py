@@ -235,6 +235,44 @@ async def test_a_restart_leaves_the_figures_viewable(tmp_path) -> None:
         assert app.plots.current.figure_id is None
 
 
+async def test_an_altair_chart_becomes_an_interactive_entry(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE):
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        await app.kernel.execute(
+            "import altair as alt, pandas as pd\n"
+            "frame = pd.DataFrame({'a': [1, 2], 'b': [3, 4]})\n"
+            "display(frame)\n"
+            "alt.Chart(frame).mark_point().encode(x='a', y='b')\n"
+        )
+        await until(lambda: app.plots.count == 1, what="the chart in the plot pane")
+
+        # The table went to the console, and only the chart to the plots.
+        assert "vega" in app.plots.current.html.lower()
+        await asyncio.sleep(0.5)
+        assert app.plots.count == 1
+
+
+async def test_a_figure_is_saved_as_svg_and_then_forgotten(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        plots = app.plots
+        await app.kernel.execute("import matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\n")
+        await until(lambda: plots.count == 1, what="a figure in the plot pane")
+        kept = plots.current.figure_id
+
+        plots.focus()
+        await pilot.press("S")
+        await until(lambda: list(tmp_path.glob("plot-*.svg")), what="the saved file")
+        assert b"<svg" in next(tmp_path.glob("plot-*.svg")).read_bytes()
+
+        await pilot.press("d")
+        assert plots.count == 0
+        assert await app.kernel.render_figure(kept, (100, 100)) is None
+
+
 def widths(app: PyStudioApp) -> tuple[int, int]:
     return app.editor.size.width, app.plots.size.width
 

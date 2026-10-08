@@ -38,6 +38,7 @@ from pystudio.introspect import (
     SETUP,
     Frame,
     Variable,
+    forget_expr,
     frame_expr,
     parse_frame,
     parse_probe,
@@ -286,6 +287,10 @@ class KernelSession:
         place before anything sent after this runs.
         """
         self._send_expression(view_expr(width, height))
+
+    def forget_figures(self, figures: list[int] | None = None) -> None:
+        """Let the kernel drop figures it kept, all of them for ``None``."""
+        self._send_expression(forget_expr(figures))
 
     async def render_figure(
         self,

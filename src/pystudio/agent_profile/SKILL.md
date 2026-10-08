@@ -25,7 +25,8 @@ your code fit that setup.
   your edits. They are gone after a restart, which is why the file must rebuild
   them from top to bottom.
 - **The plot pane shows PNG images only**, one figure at a time with a history
-  the user pages through. It is roughly a third of the screen.
+  the user pages through. It is roughly a third of the screen, though the user
+  can zoom into a figure, fill the screen with it, and resize the pane.
 - **The variable explorer lists every variable** with its type and shape. The
   user can open any DataFrame, Series or array in a scrollable, sortable table.
 
@@ -85,9 +86,11 @@ results are not the ones on their screen. The kernel is the source of truth.
 - Altair needs the PNG renderer, set once in the imports cell:
   `alt.renderers.enable("png", scale_factor=2)` (it uses `vl-convert-python`),
   and `alt.data_transformers.disable_max_rows()` for more than 5000 rows.
-- Interactive output does not render: plotly figures, bokeh, ipywidgets, and
-  HTML reprs appear as text or not at all. Export a static image instead, for
-  plotly `fig.show(renderer="png")` with `kaleido` installed.
+- Interactive output does not render in the pane. A plotly figure or an Altair
+  chart without the PNG renderer becomes a history entry the user opens in the
+  browser with `o`; bokeh, ipywidgets and other HTML reprs appear as text or
+  not at all. Prefer a static image, which the user sees at once: for plotly
+  `fig.show(renderer="png")` with `kaleido` installed.
 - Label axes with units and give each chart a title that says what it shows.
 
 ## Exploratory analysis

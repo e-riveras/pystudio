@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
 import time
+import webbrowser
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -42,6 +48,65 @@ Size = tuple[float, float]
 Window = tuple[float, float, float, float]
 
 WHOLE: Window = (0.0, 0.0, 1.0, 1.0)
+
+PAGE_NOTE = "an interactive figure\n\no opens it in the browser"
+
+
+PLOTLY = "application/vnd.plotly.v1+json"
+
+PLOTLY_PAGE = """<!doctype html>
+<meta charset="utf-8">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<div id="figure" style="width: 100%%; height: 96vh"></div>
+<script>
+const figure = %s;
+Plotly.newPlot("figure", figure.data, figure.layout, {responsive: true});
+</script>
+"""
+
+
+def page_of(bundle: dict[str, object]) -> str | None:
+    """The page that shows an interactive figure, if this output is one.
+
+    A table's HTML has no script in it, and stays out of the plot pane.
+    """
+    if PLOTLY in bundle:
+        # Plotly's own HTML expects a notebook to have loaded its library.
+        return PLOTLY_PAGE % json.dumps(bundle[PLOTLY]).replace("</", "<\\/")
+    html = bundle.get("text/html")
+    if isinstance(html, str) and "<script" in html:
+        return html
+    return None
+
+
+def launch(path: Path) -> bool:
+    """Open a file in the program the desktop uses for it. False if there is no way to."""
+    if path.suffix == ".html":
+        return webbrowser.open(path.as_uri())
+    opener = "open" if sys.platform == "darwin" else shutil.which("xdg-open")
+    if not opener:
+        return webbrowser.open(path.as_uri())
+    subprocess.Popen([opener, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
+
+
+def copy_png(path: Path) -> bool:
+    """Put a PNG file on the clipboard as an image. False if no tool for it is installed."""
+    if sys.platform == "darwin":
+        script = f'set the clipboard to (read (POSIX file "{path}") as «class PNGf»)'
+        command = ["osascript", "-e", script]
+    elif shutil.which("wl-copy"):
+        command = ["wl-copy", "--type", "image/png"]
+    elif shutil.which("xclip"):
+        command = ["xclip", "-selection", "clipboard", "-t", "image/png", "-i", str(path)]
+    else:
+        return False
+    try:
+        with path.open("rb") as png:
+            done = subprocess.run(command, stdin=png, capture_output=True, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -120,6 +185,10 @@ class Figure:
 
     png: bytes
     title: str = ""
+    html: str | None = None
+    """An interactive figure's page. It has no picture: the browser shows it."""
+    display_id: str | None = None
+    """The name the kernel updates this output by, if it gave one."""
     figure_id: int | None = None
     """The kernel's handle on the figure, while it can still draw it again."""
     layout: Size | None = None
@@ -142,7 +211,14 @@ class PlotsPane(Vertical):
         ("j,down", "pan(0, 1)", "pan down"),
         ("f,enter", "fullscreen", "fullscreen"),
         ("a", "reflow", "lay out for the pane"),
+        ("g", "gallery", "all plots"),
+        ("d", "delete", "delete plot"),
+        ("D", "clear", "delete all plots"),
+        ("o", "open", "open outside"),
+        ("y", "copy", "copy plot"),
         ("ctrl+s", "save", "save plot"),
+        ("S", "export('svg')", "save as SVG"),
+        ("P", "export('pdf')", "save as PDF"),
     ]
 
     DEFAULT_CSS = """
@@ -153,6 +229,13 @@ class PlotsPane(Vertical):
         height: 1fr;
         width: 1fr;
         align: center middle;
+    }
+    PlotsPane #plot-note {
+        width: auto;
+        height: auto;
+        text-align: center;
+        color: $text-muted;
+        display: none;
     }
     PlotsPane > #plot-caption {
         height: 1;
@@ -178,6 +261,20 @@ class PlotsPane(Vertical):
         width: int
         height: int
 
+    @dataclass
+    class Forgotten(Message):
+        """Figures were deleted, so the kernel need not keep them; ``None`` is all of them."""
+
+        figures: list[int] | None
+
+    @dataclass
+    class ExportRequested(Message):
+        """The pane wants a figure from the kernel in a vector format, to save."""
+
+        figure: int
+        fmt: str
+        size: Size | None
+
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
         self._figures: list[Figure] = []
@@ -189,10 +286,12 @@ class PlotsPane(Vertical):
         self._wanted: PlotsPane.RenderRequested | None = None
         self._render_timer: Timer | None = None
         self._resize_timer: Timer | None = None
+        self._outbox: Path | None = None
 
     def compose(self):
         with Container(id="plot-stage"):
             yield Image(id="plot-image")
+            yield Static(PAGE_NOTE, id="plot-note")
         yield Static("no plots yet", id="plot-caption")
 
     @property
@@ -227,13 +326,64 @@ class PlotsPane(Vertical):
         width, height = self._pane_pixels()
         return round(width), round(height)
 
-    def add(self, png: bytes, *, title: str = "", figure_id: int | None = None) -> None:
+    @property
+    def figures(self) -> list[Figure]:
+        return self._figures
+
+    def add(
+        self,
+        png: bytes,
+        *,
+        title: str = "",
+        figure_id: int | None = None,
+        display_id: str | None = None,
+        update: bool = False,
+    ) -> None:
         """Append a figure and show it.
 
         With ``figure_id`` the kernel kept the figure, and can draw it again.
+        With ``update`` it takes the place of the figure that has ``display_id``.
         """
-        self._figures.append(Figure(png, title=title, figure_id=figure_id))
+        self._place(
+            Figure(png, title=title, figure_id=figure_id, display_id=display_id), update=update
+        )
+
+    def add_page(
+        self, html: str, *, title: str = "", display_id: str | None = None, update: bool = False
+    ) -> None:
+        """Append an interactive figure, which the browser shows rather than the pane."""
+        self._place(Figure(b"", title=title, html=html, display_id=display_id), update=update)
+
+    def _place(self, figure: Figure, *, update: bool) -> None:
+        if update and figure.display_id is not None:
+            for index, old in enumerate(self._figures):
+                if old.display_id == figure.display_id:
+                    self._figures[index] = figure
+                    self._forget(old)
+                    if index == self._index:
+                        self._show(index)
+                    return
+        self._figures.append(figure)
         self._show(len(self._figures) - 1)
+
+    def _forget(self, *figures: Figure) -> None:
+        kept = [figure.figure_id for figure in figures if figure.figure_id is not None]
+        if kept:
+            self.post_message(self.Forgotten(kept))
+
+    def delete(self, index: int) -> None:
+        """Drop one figure from the history."""
+        if not 0 <= index < len(self._figures):
+            return
+        self._forget(self._figures.pop(index))
+        if index < self._index or self._index >= len(self._figures):
+            self._index = max(self._index - 1, 0)
+        self._show(self._index)
+
+    def select(self, index: int) -> None:
+        """Show the figure at ``index``."""
+        if 0 <= index < len(self._figures):
+            self._show(index)
 
     def detach(self, figure_id: int | None = None) -> None:
         """Forget the kernel's handle on one figure, or on all of them.
@@ -248,8 +398,11 @@ class PlotsPane(Vertical):
         """Move to another figure, which starts fitted to the pane."""
         self._index = index
         self._viewport.reset()
-        self._source = PILImage.open(BytesIO(self._figures[index].png))
-        self._source.load()
+        self._source = None
+        figure = self.current
+        if figure is not None and figure.html is None:
+            self._source = PILImage.open(BytesIO(figure.png))
+            self._source.load()
         self._render_current()
 
     # ---------------------------------------------------------------------- drawing
@@ -262,8 +415,15 @@ class PlotsPane(Vertical):
 
     def _render_current(self) -> None:
         figure, source = self.current, self._source
+        self.image_widget.display = source is not None
+        self.query_one("#plot-note").display = figure is not None and source is None
         if figure is None or source is None:
-            self.caption.update("no plots yet")
+            self.image_widget.image = None
+            self._ask_kernel()
+            if figure is None:
+                self.caption.update("no plots yet")
+            else:
+                self._caption()
             return
         pane = self._pane_pixels()
         width, height = source.size
@@ -363,6 +523,8 @@ class PlotsPane(Vertical):
         parts = [f"{self._index + 1}/{len(self._figures)}"]
         if figure.title:
             parts.append(figure.title)
+        if figure.html is not None:
+            parts.append("interactive")
         if self._viewport.zoom > 1.0:
             parts.append(f"{self._viewport.zoom:.1f}×")
         if self.reflow and figure.figure_id is not None:
@@ -426,9 +588,73 @@ class PlotsPane(Vertical):
         figure = self.current
         if figure is None:
             return
-        target = Path.cwd() / f"plot-{time.strftime('%Y%m%d-%H%M%S')}.png"
-        target.write_bytes(figure.png)
+        if figure.html is not None:
+            self.save(figure.html.encode(), "html")
+        else:
+            self.save(figure.png, "png")
+
+    def save(self, data: bytes, suffix: str) -> None:
+        """Write ``data`` next to the work, under a name with the time in it."""
+        target = Path.cwd() / f"plot-{time.strftime('%Y%m%d-%H%M%S')}.{suffix}"
+        target.write_bytes(data)
         self.caption.update(f"saved {target.name}")
+
+    def action_export(self, fmt: str) -> None:
+        figure = self.current
+        if figure is None:
+            return
+        if figure.figure_id is None:
+            self.caption.update(f"only a figure the kernel still holds can be saved as {fmt}")
+            return
+        self.post_message(self.ExportRequested(figure.figure_id, fmt, figure.layout))
+
+    def action_delete(self) -> None:
+        self.delete(self._index)
+
+    def action_clear(self) -> None:
+        if not self._figures:
+            return
+        self._figures.clear()
+        self.post_message(self.Forgotten(None))
+        self._show(0)
+
+    def action_gallery(self) -> None:
+        if not self._figures:
+            return
+        # Imported here: the gallery imports this module for its figures.
+        from pystudio.widgets.plot_gallery import PlotGallery
+
+        def chosen(index: int | None) -> None:
+            if index is not None:
+                self.select(index)
+
+        self.app.push_screen(PlotGallery(self._figures, self._index, self.delete), chosen)
+
+    def _outside(self, figure: Figure) -> Path:
+        """The figure as a file other programs can read."""
+        if self._outbox is None:
+            self._outbox = Path(tempfile.mkdtemp(prefix="pystudio-plots-"))
+        if figure.html is not None:
+            target = self._outbox / f"plot-{id(figure)}.html"
+            target.write_text(figure.html, encoding="utf-8")
+        else:
+            target = self._outbox / f"plot-{id(figure)}.png"
+            target.write_bytes(figure.png)
+        return target
+
+    def action_open(self) -> None:
+        figure = self.current
+        if figure is None:
+            return
+        opened = launch(self._outside(figure))
+        self.caption.update("opened" if opened else "found no program to open it with")
+
+    def action_copy(self) -> None:
+        figure = self.current
+        if figure is None or figure.html is not None:
+            return
+        copied = copy_png(self._outside(figure))
+        self.caption.update("copied" if copied else "found no clipboard tool for images")
 
     def _zoom(self, factor: float, at: Size = (0.5, 0.5)) -> None:
         if self._source is None:

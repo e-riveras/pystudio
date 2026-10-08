@@ -46,6 +46,7 @@ from pystudio.widgets import (
     StatusBar,
     VariablesPane,
 )
+from pystudio.widgets.plots import page_of
 
 if TYPE_CHECKING:
     from pystudio.widgets.terminal import TerminalPane
@@ -508,6 +509,10 @@ class PyStudioApp(App):
     def on_execute_result(self, message: m.ExecuteResult) -> None:
         text = message.data.get("text/plain", "")
         self.console_pane.show_result(text, message.execution_count)
+        # A chart left as the last expression of a cell, such as an Altair one.
+        page = page_of(message.data)
+        if page is not None:
+            self.plots.add_page(page)
 
     @while_running
     def on_display_data(self, message: m.DisplayData) -> None:
@@ -515,8 +520,16 @@ class PyStudioApp(App):
         if png is not None:
             kept = (message.metadata.get("image/png") or {}).get("pystudio") or {}
             self.plots.add(
-                _decode_png(png), title=str(kept.get("title", "")), figure_id=kept.get("figure")
+                _decode_png(png),
+                title=str(kept.get("title", "")),
+                figure_id=kept.get("figure"),
+                display_id=message.display_id,
+                update=message.update,
             )
+            return
+        page = page_of(message.data)
+        if page is not None:
+            self.plots.add_page(page, display_id=message.display_id, update=message.update)
             return
         text = message.data.get("text/plain")
         if text:
@@ -593,6 +606,29 @@ class PyStudioApp(App):
             self.run_worker(
                 self._render_plot(message), name="plot-render", group="plot-render", exclusive=True
             )
+
+    def on_plots_pane_forgotten(self, message: PlotsPane.Forgotten) -> None:
+        if self._kernel_ready:
+            self.kernel.forget_figures(message.figures)
+
+    def on_plots_pane_export_requested(self, message: PlotsPane.ExportRequested) -> None:
+        if self._kernel_ready:
+            self.run_worker(self._export_plot(message), name="plot-export")
+
+    async def _export_plot(self, request: PlotsPane.ExportRequested) -> None:
+        room = self.plots.room or (640, 480)
+        try:
+            data = await self.kernel.render_figure(
+                request.figure, room, size=request.size, fmt=request.fmt
+            )
+        except (TimeoutError, KernelReset):
+            data = None
+        if not self.is_running:
+            return
+        if data is None:
+            self.plots.caption.update(f"the kernel could not draw it as {request.fmt}")
+        else:
+            self.plots.save(data, request.fmt)
 
     async def _render_plot(self, request: PlotsPane.RenderRequested) -> None:
         try:
