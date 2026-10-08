@@ -76,16 +76,21 @@ results are not the ones on their screen. The kernel is the source of truth.
 
 ## Plots
 
-- matplotlib and seaborn work as they are. Call `plt.show()` at the end of the
-  cell; each figure shown becomes one entry in the plot pane.
-- One figure per cell. The pane shows one at a time, so several in a cell are
-  easy to miss.
-- Size for a small pane: around `figsize=(7, 4)`. Prefer two cells with one
-  chart each over one figure with a 3 by 3 grid nobody can read at that size.
-  Call `fig.tight_layout()`.
+- Use Altair unless the file already plots with something else, or the chart is
+  one Altair cannot draw (an image, a 3-d surface, a diagnostic that a library
+  such as ArviZ draws for you). Then use matplotlib.
 - Altair needs the PNG renderer, set once in the imports cell:
   `alt.renderers.enable("png", scale_factor=2)` (it uses `vl-convert-python`),
-  and `alt.data_transformers.disable_max_rows()` for more than 5000 rows.
+  and `alt.data_transformers.disable_max_rows()` for more than 5000 rows. End
+  each chart with `.show()`. If `altair` or `vl-convert-python` may be missing
+  from the user's environment, say so and give the install command.
+- One chart per cell. The pane shows one at a time, so several in a cell are
+  easy to miss.
+- Size for a small pane: around `.properties(width=420, height=260)`. Prefer
+  two cells with one chart each over a grid of facets nobody can read at that
+  size.
+- With matplotlib, call `plt.show()` at the end of the cell, size around
+  `figsize=(7, 4)` and call `fig.tight_layout()`. seaborn works the same way.
 - Interactive output does not render in the pane. A plotly figure or an Altair
   chart without the PNG renderer becomes a history entry the user opens in the
   browser with `o`; bokeh, ipywidgets and other HTML reprs appear as text or

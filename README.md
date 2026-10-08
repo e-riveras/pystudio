@@ -105,6 +105,10 @@ their history, completion at the prompt, tracebacks, interrupting, restarting
 and replaying, and proving the editor really is your Neovim. A test runs all of
 it, so the tour cannot drift away from the code.
 
+[`examples/plots.py`](examples/plots.py) does the same for the plot pane alone:
+zooming, filling the screen, layouts, the gallery, Altair charts and saving.
+Open it with `uv run pystudio examples/plots.py`.
+
 ## The assistant
 
 Off by default; start pystudio with `--assistant` (see

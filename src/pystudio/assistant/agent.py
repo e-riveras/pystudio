@@ -43,6 +43,12 @@ buffer already has them, one step per cell, a short title on each, and comments 
 where a choice needs explaining. Prefer the libraries the buffer already uses. If a \
 library the code needs may not be installed, say so in the chat.
 
+Plot with Altair unless the buffer already plots with another library, or the chart is \
+one Altair cannot draw. The plot pane shows PNG images, so the imports cell needs \
+`alt.renderers.enable("png", scale_factor=2)`, which uses the vl-convert-python package, \
+and `alt.data_transformers.disable_max_rows()` when the data has more than 5000 rows. \
+One chart per cell, sized near 420 by 260, each ending in `.show()`.
+
 To change code that exists, read the buffer again and use replace_lines. When the user \
 reports an error, read the console before guessing.
 

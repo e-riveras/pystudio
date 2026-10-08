@@ -27,6 +27,7 @@ from pystudio.widgets import (
 )
 
 from .conftest import HANG, Scripted
+from .test_demo import cells
 
 pytestmark = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
 
@@ -271,6 +272,24 @@ async def test_a_figure_is_saved_as_svg_and_then_forgotten(tmp_path, monkeypatch
         await pilot.press("d")
         assert plots.count == 0
         assert await app.kernel.render_figure(kept, (100, 100)) is None
+
+
+async def test_the_plots_example_fills_the_history(tmp_path) -> None:
+    """Run examples/plots.py, so the tour of the plot pane cannot rot unnoticed."""
+    source = (Path(__file__).resolve().parents[1] / "examples" / "plots.py").read_text()
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE):
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        for cell in cells(source):
+            assert await app.kernel.run(cell) == "ok", cell
+        await until(lambda: "done" in transcript(app), what="the last cell")
+
+        figures = app.plots.figures
+        # Three figures, an Altair picture, a page, one updated output, three more.
+        assert len(figures) == 9
+        assert [figure.html is not None for figure in figures].count(True) == 1
+        assert sum(figure.figure_id is not None for figure in figures) == 7
+        assert figures[5].title == "updated in place"
 
 
 def widths(app: PyStudioApp) -> tuple[int, int]:

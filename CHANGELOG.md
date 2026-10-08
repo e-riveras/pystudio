@@ -43,6 +43,9 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- The assistant and the agent plot with Altair by default, and fall back to
+  matplotlib when the file already uses it or Altair cannot draw the chart.
+
 - Sending the whole file (`\f`) or everything above (`\a`) runs one cell at a
   time and stops at the first that fails, instead of sending one block that a
   single error or typo stopped as a whole.

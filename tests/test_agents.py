@@ -13,7 +13,7 @@ def test_the_profile_is_a_claude_code_plugin_with_one_skill(tmp_path) -> None:
     assert manifest["name"] == "pystudio"
     skill = (plugin / "skills" / "data-science" / "SKILL.md").read_text()
     assert skill.startswith("---\nname: data-science\ndescription: ")
-    for needed in ("# %%", "list_variables", "PNG", "plt.show()"):
+    for needed in ("# %%", "list_variables", "PNG", "Use Altair", "alt.renderers.enable"):
         assert needed in skill
 
 
