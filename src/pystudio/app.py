@@ -22,6 +22,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher
 from textual.worker import Worker
@@ -597,7 +598,11 @@ class PyStudioApp(App):
 
     def _send_plot_view(self) -> None:
         """Tell the kernel how much room a figure has, so it draws them to fit."""
-        room = self.plots.room
+        try:
+            room = self.plots.room
+        except NoMatches:
+            # The kernel came up while the app was closing, and the panes are gone.
+            return
         if self._kernel_ready and room is not None:
             self.kernel.set_plot_view(*room)
 

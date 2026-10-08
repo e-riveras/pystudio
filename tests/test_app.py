@@ -292,6 +292,16 @@ async def test_the_plots_example_fills_the_history(tmp_path) -> None:
         assert figures[5].title == "updated in place"
 
 
+async def test_a_kernel_that_comes_up_during_shutdown_finds_no_panes(tmp_path) -> None:
+    """Quitting before the kernel is ready must not end in a traceback."""
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE):
+        await until(lambda: app._kernel_ready, what="a running kernel")
+    app._kernel_ready = True
+
+    app._send_plot_view()
+
+
 def widths(app: PyStudioApp) -> tuple[int, int]:
     return app.editor.size.width, app.plots.size.width
 

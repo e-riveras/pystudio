@@ -186,12 +186,12 @@ class TerminalPane(Widget, can_focus=True):
         """End the program and its children, gently first."""
         process = self.process
         if process is not None and process.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(process.pid, signal.SIGHUP)
             try:
                 await asyncio.wait_for(process.wait(), 2.0)
             except TimeoutError:
-                with contextlib.suppress(ProcessLookupError):
+                with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
         if self._waiter is not None:

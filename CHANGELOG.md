@@ -6,6 +6,12 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Quitting while the kernel is still starting no longer ends in a traceback.
+- Closing the agent pane no longer fails on macOS when its program has already
+  exited.
+
 ## [0.2.0] - 2026-10-08
 
 ### Added
