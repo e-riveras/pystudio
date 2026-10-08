@@ -10,6 +10,11 @@ user can enter, not on TCP. Jupyter signs its messages but does not encrypt
 them, so on loopback ports any local user could subscribe to iopub and read
 every output.
 
+Shell requests go to the kernel one at a time, each after the reply to the one
+before. The kernel would queue them itself, but ipykernel 7 can stop answering
+the shell channel for good when requests reach it while a cell is running, and
+the app sends plenty of its own: variable snapshots, table pages, figure renders.
+
 The shell channel has exactly one consumer, this class. Request/reply pairs that
 callers need to await (completion, inspection) are resolved through a futures
 map keyed by ``msg_id``, rather than by reading the channel a second time, which
@@ -23,6 +28,7 @@ import logging
 import shutil
 import tempfile
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -129,6 +135,9 @@ class KernelSession:
         self._probes: dict[str, None] = {}  # and emit a snapshot on reply
         self._restarting = False
         self._closing = False
+        # Requests not yet sent, and the id of the one the kernel is working on.
+        self._queue: deque[dict[str, Any]] = deque()
+        self._outstanding: str | None = None
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -239,7 +248,7 @@ class KernelSession:
         store_history: bool = True,
     ) -> str:
         """Run ``code``. Output arrives later as messages. Returns the msg_id."""
-        msg_id: str = self.client.execute(code, silent=silent, store_history=store_history)
+        msg_id = self._execute_request(code, silent=silent, store_history=store_history)
         if silent:
             self._track(self._silent, msg_id)
         return msg_id
@@ -250,12 +259,12 @@ class KernelSession:
         Returns the reply's status: ``ok``, ``error`` or ``aborted``. Raises
         :class:`KernelReset` if the kernel goes away first.
         """
-        content = await self._await_reply(lambda: self.client.execute(code), timeout=None)
+        content = await self._await_reply(lambda: self._execute_request(code), timeout=None)
         return str(content.get("status", "error"))
 
     async def probe_variables(self) -> str:
         """Take a variable snapshot without touching history or producing output."""
-        msg_id: str = self.client.execute(
+        msg_id = self._execute_request(
             "",
             silent=True,
             store_history=False,
@@ -330,7 +339,7 @@ class KernelSession:
 
     def _send_expression(self, expression: str) -> str:
         """Evaluate an expression quietly and return the request's msg_id."""
-        msg_id: str = self.client.execute(
+        msg_id = self._execute_request(
             "",
             silent=True,
             store_history=False,
@@ -342,15 +351,70 @@ class KernelSession:
 
     async def complete(self, code: str, cursor_pos: int | None = None) -> dict[str, Any]:
         """Ask the kernel for completions at ``cursor_pos``."""
-        return await self._await_reply(lambda: self.client.complete(code, cursor_pos))
+        position = len(code) if cursor_pos is None else cursor_pos
+        return await self._await_reply(
+            lambda: self._request("complete_request", {"code": code, "cursor_pos": position})
+        )
 
     async def inspect(
         self, code: str, cursor_pos: int | None = None, detail_level: int = 0
     ) -> dict[str, Any]:
         """Ask the kernel for documentation at ``cursor_pos``."""
         return await self._await_reply(
-            lambda: self.client.inspect(code, cursor_pos, detail_level=detail_level)
+            lambda: self._request(
+                "inspect_request",
+                {
+                    "code": code,
+                    "cursor_pos": len(code) if cursor_pos is None else cursor_pos,
+                    "detail_level": detail_level,
+                },
+            )
         )
+
+    # ------------------------------------------------------------ one request at a time
+
+    def _execute_request(
+        self,
+        code: str,
+        *,
+        silent: bool = False,
+        store_history: bool = True,
+        user_expressions: dict[str, str] | None = None,
+    ) -> str:
+        return self._request(
+            "execute_request",
+            {
+                "code": code,
+                "silent": silent,
+                "store_history": store_history,
+                "user_expressions": user_expressions or {},
+                "allow_stdin": self.client.allow_stdin,
+                "stop_on_error": True,
+            },
+        )
+
+    def _request(self, msg_type: str, content: dict[str, Any] | None = None) -> str:
+        """Queue a shell request and return its msg_id, which is known before it is sent."""
+        message: dict[str, Any] = self.client.session.msg(msg_type, content or {})
+        self._queue.append(message)
+        self._send_next()
+        return str(message["header"]["msg_id"])
+
+    def _send_next(self) -> None:
+        if self._outstanding is None and self._queue:
+            message = self._queue.popleft()
+            self._outstanding = message["header"]["msg_id"]
+            self.client.shell_channel.send(message)
+
+    def _answered(self, msg_id: str) -> None:
+        if msg_id == self._outstanding:
+            self._outstanding = None
+            self._send_next()
+
+    def _drop_queue(self) -> None:
+        """Forget what was waiting to be sent: the kernel it was for is gone."""
+        self._queue.clear()
+        self._outstanding = None
 
     def send_input(self, text: str) -> None:
         """Answer a pending :class:`~pystudio.messages.InputRequest`."""
@@ -366,6 +430,11 @@ class KernelSession:
             return await asyncio.wait_for(future, timeout)
         finally:
             self._pending.pop(msg_id, None)
+            if not future.done() or future.cancelled():
+                # Nobody is waiting any more, so do not send it if it has not gone.
+                self._queue = deque(
+                    message for message in self._queue if message["header"]["msg_id"] != msg_id
+                )
 
     async def barrier(self, timeout: float = READY_TIMEOUT) -> None:
         """Return once the kernel has finished everything queued before this call.
@@ -375,7 +444,7 @@ class KernelSession:
         socket, so a caller that needs the output as well should wait for the
         trailing ``idle`` after this returns.
         """
-        await self._await_reply(lambda: self.client.kernel_info(), timeout=timeout)
+        await self._await_reply(lambda: self._request("kernel_info_request"), timeout=timeout)
 
     async def _wait_ready(self, timeout: float = READY_TIMEOUT) -> None:
         """Wait for the kernel to answer ``kernel_info_request``.
@@ -391,6 +460,8 @@ class KernelSession:
                 await self.barrier(timeout=2.0)
                 return
             except TimeoutError:
+                # The kernel never saw that request, so its answer is not coming.
+                self._drop_queue()
                 if time.monotonic() >= deadline:
                     raise
 
@@ -498,6 +569,7 @@ class KernelSession:
     def _handle_shell(self, message: dict[str, Any]) -> None:
         parent_id = self._parent_id(message)
         content: dict[str, Any] = message.get("content") or {}
+        self._answered(parent_id)
 
         # Awaited requests come first: a quiet expression is tracked like a
         # probe but its reply belongs to whoever is waiting for it.
@@ -529,6 +601,7 @@ class KernelSession:
     # ------------------------------------------------------------------- internals
 
     def _fail_pending(self, reason: str) -> None:
+        self._drop_queue()
         for future in self._pending.values():
             if not future.done():
                 future.set_exception(KernelReset(reason))

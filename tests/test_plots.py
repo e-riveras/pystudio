@@ -333,6 +333,18 @@ async def test_an_update_takes_the_place_of_the_figure_it_names() -> None:
         assert str(plots.caption.content).startswith("2/2")
 
 
+async def test_an_update_of_the_same_figure_keeps_it_in_the_kernel() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add(png(), figure_id=3, display_id="live")
+        plots.add(png(colour="blue"), figure_id=3, display_id="live", update=True)
+        await pilot.pause()
+
+        assert plots.count == 1 and plots.current.figure_id == 3
+        assert app.forgotten == []
+
+
 async def test_an_interactive_figure_opens_in_the_browser(monkeypatch) -> None:
     opened: list[Path] = []
     monkeypatch.setattr(plots_module, "launch", lambda path: opened.append(path) or True)

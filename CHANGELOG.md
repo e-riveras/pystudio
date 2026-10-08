@@ -62,6 +62,8 @@ All notable changes to this project are recorded here. The format follows
 - A kernel that fails to start is cleaned up instead of left running.
 - `ctrl+g` shortcuts work while typing in the console prompt; the second key
   used to be typed into the prompt instead.
+- The kernel no longer stops answering after a request reached it while a cell
+  was running. Requests are now sent one at a time.
 
 ## [0.1.0] - 2026-10-01
 

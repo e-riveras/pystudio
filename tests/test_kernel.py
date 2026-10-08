@@ -318,3 +318,25 @@ async def test_restart_forgets_the_figures(kernel: KernelSession, recorder: Reco
     await kernel.restart()
 
     assert await kernel.render_figure(figure_id(shown), (100, 100)) is None
+
+
+async def test_requests_made_while_a_cell_runs_are_all_answered(kernel: KernelSession) -> None:
+    """They wait their turn here; ipykernel 7 can go deaf if they pile up on its side."""
+    for _ in range(25):
+        cell = asyncio.create_task(kernel.run("import time; time.sleep(0.02)"))
+        await asyncio.sleep(0.01)
+        kernel.set_plot_view(640, 480)
+        asked = [asyncio.create_task(kernel.evaluate("6 * 7")) for _ in range(3)]
+
+        assert await asyncio.wait_for(cell, 10) == "ok"
+        assert [await answer for answer in asked] == [(True, "42")] * 3
+
+
+async def test_a_request_nobody_waits_for_is_not_sent(kernel: KernelSession) -> None:
+    await kernel.execute("import time; time.sleep(0.5)")
+    with pytest.raises(TimeoutError):
+        await kernel.evaluate("undefined_name", timeout=0.1)
+
+    # Had it been sent it would have run, and failed, before this one.
+    assert await kernel.evaluate("1") == (True, "1")
+    assert not kernel._queue

@@ -364,7 +364,8 @@ class PlotsPane(Vertical):
             for index, old in enumerate(self._figures):
                 if old.display_id == figure.display_id:
                     self._figures[index] = figure
-                    self._forget(old)
+                    if old.figure_id != figure.figure_id:
+                        self._forget(old)
                     if index == self._index:
                         self._show(index)
                     return
