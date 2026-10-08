@@ -6,6 +6,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-08
+
 ### Added
 
 - The plot pane zooms and pans, by key and with the mouse, and `f` or a double
@@ -79,5 +81,6 @@ First release, on GitHub.
 - A guided tour in `examples/demo.py`, run by the test suite.
 - A startup check that Neovim 0.10 or newer is on `PATH`.
 
-[Unreleased]: https://github.com/e-riveras/pystudio/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/e-riveras/pystudio/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/e-riveras/pystudio/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/e-riveras/pystudio/releases/tag/v0.1.0
