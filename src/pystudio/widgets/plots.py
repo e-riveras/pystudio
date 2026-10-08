@@ -44,6 +44,11 @@ CELLS_PER_INCH = 5
 """A terminal line is about a fifth of an inch, which sets the size of a
 figure laid out for the pane: its text then comes out near the terminal's."""
 
+MAX_CELLS = 297
+"""The most cells an image may span either way. The Kitty graphics protocol
+numbers rows and columns with a fixed set of marks, and ``textual-image``
+refuses an image past the end of it."""
+
 Size = tuple[float, float]
 Window = tuple[float, float, float, float]
 
@@ -410,8 +415,13 @@ class PlotsPane(Vertical):
     def _pane_pixels(self) -> Size:
         """The room there is for the figure, in pixels."""
         cell = get_cell_size()
+        columns, rows = self._cells()
+        return columns * cell.width, rows * cell.height
+
+    def _cells(self) -> tuple[int, int]:
+        """The cells a figure may take: the stage, up to what the terminal can draw."""
         room = self.stage.size
-        return max(room.width, 1) * cell.width, max(room.height, 1) * cell.height
+        return int(_clamp(room.width, 1, MAX_CELLS)), int(_clamp(room.height, 1, MAX_CELLS))
 
     def _render_current(self) -> None:
         figure, source = self.current, self._source
@@ -446,11 +456,11 @@ class PlotsPane(Vertical):
         """
         assert self._source is not None
         cell = get_cell_size()
-        room = self.stage.size
+        columns, rows = self._cells()
         shown = self._viewport.shown(self._source.size, self._pane_pixels())
         image = self.image_widget
-        image.styles.width = int(_clamp(round(shown[0] / cell.width), 1, max(room.width, 1)))
-        image.styles.height = int(_clamp(round(shown[1] / cell.height), 1, max(room.height, 1)))
+        image.styles.width = int(_clamp(round(shown[0] / cell.width), 1, columns))
+        image.styles.height = int(_clamp(round(shown[1] / cell.height), 1, rows))
         image.image = view
 
     # ---------------------------------------------------------------- sharp renders

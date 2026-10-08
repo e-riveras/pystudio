@@ -11,7 +11,15 @@ from textual.app import App
 
 from pystudio.widgets import plots as plots_module
 from pystudio.widgets.plot_gallery import PlotGallery
-from pystudio.widgets.plots import MAX_ZOOM, RENDER_DELAY, WHOLE, PlotsPane, Viewport, page_of
+from pystudio.widgets.plots import (
+    MAX_CELLS,
+    MAX_ZOOM,
+    RENDER_DELAY,
+    WHOLE,
+    PlotsPane,
+    Viewport,
+    page_of,
+)
 
 FIGURE = (640.0, 480.0)
 PANE = (400.0, 400.0)
@@ -140,6 +148,18 @@ async def test_the_figure_keeps_its_proportions_on_screen() -> None:
         # Cells are twice as tall as wide, so a square takes twice the columns.
         image = plots.image_widget
         assert image.size.width == 2 * image.size.height
+
+
+async def test_a_figure_never_spans_more_cells_than_the_terminal_can_draw() -> None:
+    """A very wide terminal, with the pane filling it, is past the Kitty protocol's limit."""
+    app = PlotsApp()
+    async with app.run_test(size=(400, 60)) as pilot:
+        plots = app.plots
+        plots.add(png((4000, 400)))
+        await pilot.pause()
+
+        assert plots.image_widget.size.width == MAX_CELLS
+        assert plots.room[0] == MAX_CELLS * 10
 
 
 async def test_another_figure_starts_fitted() -> None:
