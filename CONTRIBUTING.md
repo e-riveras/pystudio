@@ -9,8 +9,8 @@ Open an [issue](https://github.com/e-riveras/pystudio/issues) and say:
 
 - what you did, what you expected and what happened instead
 - your terminal (Kitty, Ghostty, WezTerm, iTerm2, ...) and operating system
-- the output of `pystudio --help | head -1`, `nvim --version | head -1` and
-  `python --version`
+- the pystudio version (`uv tool list` shows it), and the output of
+  `nvim --version | head -1` and `python --version`
 - whether it also happens with `pystudio --clean`, which starts Neovim without
   your own config
 
