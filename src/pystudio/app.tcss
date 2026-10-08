@@ -2,12 +2,32 @@ Screen {
     layout: vertical;
 }
 
+#body {
+    layout: horizontal;
+    height: 1fr;
+}
+
+#agent {
+    width: 40%;
+    height: 100%;
+    border: round $surface-lighten-2;
+    border-title-color: $text-muted;
+    border-title-align: left;
+    display: none;
+}
+
+#agent:focus {
+    border: round $accent;
+    border-title-color: $accent;
+}
+
 #panes {
     layout: grid;
     grid-size: 2 2;
     grid-columns: 2fr 1fr;
     grid-rows: 1fr 1fr;
-    height: 1fr;
+    height: 100%;
+    width: 1fr;
 }
 
 #dock {

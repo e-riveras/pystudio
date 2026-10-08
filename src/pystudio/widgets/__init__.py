@@ -7,6 +7,7 @@ from pystudio.widgets.kernel_picker import KernelPicker
 from pystudio.widgets.nvim_pane import NvimPane
 from pystudio.widgets.plots import PROTOCOL, PlotsPane
 from pystudio.widgets.status import StatusBar
+from pystudio.widgets.terminal import TerminalPane
 from pystudio.widgets.variables import VariablesPane
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "NvimPane",
     "PlotsPane",
     "StatusBar",
+    "TerminalPane",
     "VariablesPane",
 ]

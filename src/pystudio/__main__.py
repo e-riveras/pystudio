@@ -39,6 +39,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--kernel", help="registered Jupyter kernel to use instead of a project interpreter"
     )
+    from pystudio.agents import AGENTS
+
+    parser.add_argument(
+        "--agent",
+        choices=sorted(AGENTS),
+        help="coding agent for the ctrl+g c pane (default: $PYSTUDIO_AGENT, then claude)",
+    )
     return parser
 
 
@@ -65,7 +72,9 @@ def main(argv: list[str] | None = None) -> int:
 
     from pystudio.app import PyStudioApp
 
-    app = PyStudioApp(path=args.file, clean=args.clean, nvim=args.nvim, choice=choice)
+    app = PyStudioApp(
+        path=args.file, clean=args.clean, nvim=args.nvim, choice=choice, agent=args.agent
+    )
     app.run()
     return 0
 

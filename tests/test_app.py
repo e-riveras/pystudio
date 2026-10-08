@@ -14,6 +14,7 @@ import pytest
 from PIL import Image as PILImage
 
 from pystudio import messages as m
+from pystudio.agents import Agent
 from pystudio.app import PyStudioApp
 from pystudio.assistant.provider import TextDelta, ToolCall, TurnEnd
 from pystudio.interpreter import KernelChoice
@@ -436,3 +437,71 @@ async def test_sending_the_file_runs_cells_and_stops_at_a_failure(tmp_path) -> N
         await until(lambda: "first" in names(app.variables), what="the first cell's variable")
         assert "third" not in names(app.variables)
         assert app._running_cells is None
+
+
+AGENT = """
+import json, socket, sys
+path, target = sys.argv[1], sys.argv[2]
+print("agent ready", flush=True)
+for line in sys.stdin:
+    word = line.strip()
+    if word == "edit":
+        with open(target, "a") as file:
+            file.write("added = 2\\n")
+        print("edited", flush=True)
+    elif word == "vars":
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.connect(path)
+            request = {"name": "list_variables", "input": {}}
+            connection.sendall(json.dumps(request).encode() + b"\\n")
+            answer = json.loads(connection.makefile().readline())
+        print("vars:", answer["text"].replace("\\t", " ").splitlines()[1:], flush=True)
+    else:
+        print("got", word, flush=True)
+"""
+
+
+async def type_line(pilot, text: str) -> None:
+    await pilot.press(*text, "enter")
+
+
+async def test_the_agent_pane_runs_the_agent_beside_the_editor(tmp_path) -> None:
+    target = tmp_path / "analysis.py"
+    target.write_text("first = 1\n")
+    script = tmp_path / "agent.py"
+    script.write_text(AGENT)
+    agent = Agent(
+        "scripted", lambda socket: [sys.executable, str(script), str(socket), str(target)]
+    )
+
+    app = PyStudioApp(clean=True, path=target, agent=agent)
+    async with app.run_test(size=(140, 30)) as pilot:
+        await until(lambda: app._kernel_ready and app.editor.channel > 0, what="startup")
+        assert not app.agent_pane.display
+
+        # An unsaved edit is written when the agent takes focus.
+        await app.editor.set_lines(0, 1, ["first = 10"])
+        await pilot.press("ctrl+g", "c")
+        pane = app.agent_pane
+        assert pane.display and app.focused is pane
+        await until(lambda: "agent ready" in pane.text, what="the agent")
+        await until(lambda: target.read_text() == "first = 10\n", what="the save")
+        assert pane.size.width < app.editor.size.width * 2
+
+        await type_line(pilot, "hi")
+        await until(lambda: "got hi" in pane.text, what="typed input")
+
+        # The agent's edit to the file appears in the editor by itself.
+        await type_line(pilot, "edit")
+        await until_async(lambda: buffer(app), ["first = 10", "added = 2"], what="live reload")
+
+        # The kernel, through the bridge.
+        app._execute("seen = 7")
+        await until(lambda: "seen" in names(app.variables), what="a variable")
+        await type_line(pilot, "vars")
+        await until(lambda: "seen int" in pane.text, what="the bridge answer")
+
+        await pilot.press("ctrl+g", "c")
+        assert not pane.display
+        assert app.focused is app.editor
+        assert pane.running, "hiding the pane keeps the agent"

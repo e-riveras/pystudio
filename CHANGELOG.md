@@ -13,6 +13,11 @@ All notable changes to this project are recorded here. The format follows
   falls back to its own Python and says how to fix it. The status bar names
   the environment.
 - `--python PATH` picks the kernel's interpreter explicitly.
+- An agent pane, on `ctrl+g c`: a full-height column running Claude Code's own
+  CLI in an embedded terminal, with your existing login. Its edits appear live
+  in the editor, and it can inspect the kernel through an MCP server.
+- Buffers reload as soon as their file changes on disk, as one undo step;
+  unsaved edits are kept.
 - An assistant, on `ctrl+g a`: ask for analysis code in plain words and it
   writes `# %%` cells into the editor, after looking at the buffer, the
   kernel's variables and the files it needs. It never runs the code. Uses

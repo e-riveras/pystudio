@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib.resources import files
 
-LUA_FILES = ("send.lua", "cells.lua")
+LUA_FILES = ("send.lua", "cells.lua", "reload.lua")
 """Installed in order: cells.lua uses what send.lua puts in ``_G.pystudio``."""
 
 

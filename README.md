@@ -127,6 +127,45 @@ The model sits behind a small interface (`pystudio/assistant/provider.py`), so
 another provider is one module and one entry in `PROVIDERS`, selected with
 `PYSTUDIO_ASSISTANT`. Only Anthropic is implemented.
 
+## The agent pane
+
+`ctrl+g c` opens a full-height column on the left and runs a coding agent in
+it: Claude Code today. It is the agent's own command line program in a terminal
+inside pystudio, not a reimplementation, so it uses the login and subscription
+you already have, and its slash commands, prompts and permission questions are
+the ones you know. `ctrl+g c` from inside the column hides it and leaves the
+agent running; `ctrl+g 1` goes back to the editor with the column still open.
+
+```
+┌ agent: claude ───┬ editor (nvim) ──────┬ variables ┐
+│ > add a cell     │ # %% fit            │ df  ...   │
+│ ● Edit(a.py)     │ model = ...         ├ plots ────┤
+│                  ├ console ────────────┤           │
+└──────────────────┴─────────────────────┴───────────┘
+```
+
+Two things make it part of the IDE rather than a terminal beside it:
+
+- **Its edits are live.** The editor watches the files it has open and reloads
+  one the moment it changes on disk, so what the agent writes appears in your
+  buffer as it happens. A reload is one undo step. A buffer with unsaved edits
+  is never overwritten; you get a one-line warning instead. Going the other
+  way, focusing the agent saves your modified buffers first, so it reads what
+  you see.
+- **It can see the kernel.** pystudio gives the agent an MCP server named
+  `pystudio` with `list_variables`, `inspect` and `read_console`, the same
+  read-only look at your live session that the assistant has. It cannot run
+  your cells.
+
+The agent needs its CLI on `PATH`: `claude` for Claude Code. `--agent NAME` or
+`PYSTUDIO_AGENT` picks one; Claude Code is the default and so far the only
+entry. Adding another is a few lines in `pystudio/agents.py`, since any agent
+that runs in a terminal works: only how it is told about the MCP server differs.
+
+`ctrl+g` belongs to pystudio, so the agent never receives it; Claude Code's own
+`ctrl+g` shortcut is not available here. `shift+enter` adds a line without
+sending. The mouse wheel scrolls back, and any key returns to the present.
+
 ## Keys
 
 Neovim owns its whole keyspace, so pystudio's own keys sit behind a `ctrl+g`
@@ -136,6 +175,7 @@ chord. Press `ctrl+g`, then:
 | --- | --- |
 | `1` `2` `3` `4` | focus editor, console, variables, plots |
 | `a` | show the assistant in the console's place; `2` brings the console back |
+| `c` | open the coding agent column and focus it; from inside it, hide it |
 | `z` | zoom the focused pane, toggle |
 | `r` | restart the kernel |
 | `i` | interrupt the kernel |
@@ -231,6 +271,12 @@ statusline.
   to it over the Neovim RPC channel, and inspecting the kernel with the same
   quiet expressions the variable explorer uses. No widget is imported there;
   the app hands it a workspace.
+- **Agent pane.** `pystudio/widgets/terminal.py` runs the agent on a pty and
+  paints `pyte`'s screen model, the same way the editor pane paints Neovim's
+  grid. `pystudio/lua/reload.lua` keeps buffers in step with their files using
+  libuv file watchers. The agent's MCP server is a small separate process,
+  `pystudio.mcp_bridge`, that forwards each tool call to the app over a Unix
+  socket in a private directory.
 - **Cursor.** A character cell cannot be subdivided, so a block cursor is drawn
   reversed, a horizontal one underlines its character, and a vertical one becomes
   a thin bar glyph in place of the character.

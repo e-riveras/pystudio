@@ -20,13 +20,15 @@ from pathlib import Path
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher
 from textual.worker import Worker
 
 from pystudio import assistant as ai
 from pystudio import messages as m
+from pystudio.agents import Agent, choose
+from pystudio.assistant.bridge import Bridge
 from pystudio.assistant.workspace import AppWorkspace
 from pystudio.interpreter import KernelChoice, candidates, has_ipykernel
 from pystudio.introspect import Variable
@@ -40,6 +42,7 @@ from pystudio.widgets import (
     NvimPane,
     PlotsPane,
     StatusBar,
+    TerminalPane,
     VariablesPane,
 )
 
@@ -103,6 +106,7 @@ class PyStudioApp(App):
         Binding("r", "chord_restart", "restart kernel", priority=True, show=False),
         Binding("i", "chord_interrupt", "interrupt kernel", priority=True, show=False),
         Binding("k", "chord_kernels", "switch kernel", priority=True, show=False),
+        Binding("c", "chord_agent", "coding agent", priority=True, show=False),
         Binding("q", "chord_quit", "quit", priority=True, show=False),
         Binding("escape", "chord_cancel", "cancel", priority=True, show=False),
     ]
@@ -116,6 +120,7 @@ class PyStudioApp(App):
         kernel_name: str = "python3",
         choice: KernelChoice | None = None,
         assistant: ai.Provider | None = None,
+        agent: Agent | str | None = None,
     ) -> None:
         super().__init__()
         self.path = path
@@ -133,6 +138,8 @@ class PyStudioApp(App):
         self._assistant: ai.Assistant | None = None
         self._asking: Worker[None] | None = None
         self._running_cells: Worker[None] | None = None
+        self._agent = agent
+        self._bridge: Bridge | None = None
 
     def _session(self, choice: KernelChoice) -> KernelSession:
         return KernelSession(
@@ -146,6 +153,12 @@ class PyStudioApp(App):
     # ------------------------------------------------------------------- structure
 
     def compose(self) -> ComposeResult:
+        with Horizontal(id="body"):
+            yield TerminalPane(id="agent")
+            yield from self._panes()
+        yield StatusBar(kernel_name=self.choice.label, protocol=PROTOCOL, id="status")
+
+    def _panes(self) -> ComposeResult:
         with Container(id="panes"):
             yield NvimPane(
                 id="editor",
@@ -158,7 +171,6 @@ class PyStudioApp(App):
                 yield ConsolePane(id="console")
                 yield AssistantPane(id="assistant")
             yield PlotsPane(id="plots")
-        yield StatusBar(kernel_name=self.choice.label, protocol=PROTOCOL, id="status")
 
     def on_mount(self) -> None:
         for pane_id, title in PANE_TITLES.items():
@@ -180,6 +192,8 @@ class PyStudioApp(App):
         self._kernel_ready = True
 
     async def on_unmount(self) -> None:
+        if self._bridge is not None:
+            await self._bridge.stop()
         if self._kernel_ready:
             await self.kernel.shutdown()
 
@@ -192,6 +206,10 @@ class PyStudioApp(App):
     @property
     def console_pane(self) -> ConsolePane:
         return self.query_one("#console", ConsolePane)
+
+    @property
+    def agent_pane(self) -> TerminalPane:
+        return self.query_one("#agent", TerminalPane)
 
     @property
     def assistant_pane(self) -> AssistantPane:
@@ -328,6 +346,42 @@ class PyStudioApp(App):
             await self._start_kernel()
         finally:
             self._switching = False
+
+    # ------------------------------------------------------------------ agent pane
+
+    def action_chord_agent(self) -> None:
+        """Open the agent column and focus it, or hide it when it has focus."""
+        self.cancel_chord()
+        pane = self.agent_pane
+        if pane.display and pane.has_focus:
+            pane.display = False
+            self.editor.focus()
+            return
+        pane.display = True
+        pane.focus()
+        if not pane.running and not pane.argv:
+            self.run_worker(self._start_agent(), name="agent")
+
+    async def _start_agent(self) -> None:
+        pane = self.agent_pane
+        try:
+            agent = self._agent if isinstance(self._agent, Agent) else choose(self._agent)
+        except ValueError as error:
+            pane.notice = str(error)
+            pane.refresh()
+            return
+        pane.border_title = f"agent: {agent.name}"
+        if self._bridge is None:
+            self._bridge = Bridge(AppWorkspace(self))
+        socket = await self._bridge.start()
+        # Let the pane take its size before the agent asks for it.
+        await asyncio.sleep(0)
+        await pane.start(agent.command(socket), cwd=self.cwd)
+
+    def on_descendant_focus(self, event) -> None:
+        # The agent reads files from disk, so it should see what the user sees.
+        if event.widget is self.agent_pane and self.editor.rpc.running:
+            self.editor.rpc.notify("nvim_command", "silent! wall")
 
     def action_chord_quit(self) -> None:
         self.cancel_chord()

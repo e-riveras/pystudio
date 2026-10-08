@@ -6,9 +6,39 @@ Expects "Top Movies dataset.csv" in ~/Downloads. Run it cell by cell, or with \\
 # %% EDA imports and load
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import altair as alt
 import numpy as np
 import pandas as pd
+
+# pystudio's plot pane shows PNG output, and the dataset is larger than Altair's 5000-row default
+alt.renderers.enable("png", scale_factor=2)
+alt.data_transformers.disable_max_rows()
+
+BLUE = "#2a78d6"  # colour never encodes a variable here, so every mark shares one hue
+INK, MUTED, GRID = "#0b0b0b", "#898781", "#e1e0d9"
+
+
+@alt.theme.register("eda", enable=True)
+def eda_theme() -> alt.theme.ThemeConfig:
+    return {
+        "config": {
+            "background": "#fcfcfb",
+            "view": {"stroke": None},
+            "title": {"color": INK, "anchor": "start", "fontSize": 13},
+            "axis": {
+                "labelColor": MUTED,
+                "titleColor": MUTED,
+                "titleFontWeight": "normal",
+                "gridColor": GRID,
+                "domainColor": "#c3c2b7",
+                "tickColor": "#c3c2b7",
+            },
+            "bar": {"color": BLUE},
+            "line": {"color": BLUE, "strokeWidth": 2},
+            "circle": {"color": BLUE},
+        }
+    }
+
 
 path = Path.home() / "Downloads" / "Top Movies dataset.csv"
 raw = pd.read_csv(path)
@@ -49,43 +79,39 @@ df[df.duplicated(["Title", "Release_Date"], keep=False)].sort_values("Title").he
 df[["Popularity", "Vote_Count", "Vote_Average", "Year"]].describe().T
 
 # %% EDA numeric distributions
-figure, axes = plt.subplots(1, 3, figsize=(14, 4))
-
 # popularity and vote count are heavily right-skewed, so plot their logs
-axes[0].hist(np.log10(df["Popularity"].clip(lower=0.01)), bins=40, color="#4c78a8")
-axes[0].set_title("log10 popularity")
+distributions = pd.DataFrame(
+    {
+        "log10 popularity": np.log10(df["Popularity"].clip(lower=0.01)),
+        "log10 (vote count + 1)": np.log10(df["Vote_Count"] + 1),
+        # a rating of 0 usually means the film has no votes
+        "vote average": df["Vote_Average"],
+    }
+)
 
-axes[1].hist(np.log10(df["Vote_Count"] + 1), bins=40, color="#f58518")
-axes[1].set_title("log10 (vote count + 1)")
-
-# a rating of 0 usually means the film has no votes
-axes[2].hist(df["Vote_Average"], bins=40, color="#54a24b")
-axes[2].set_title("vote average")
-
-figure.tight_layout()
-plt.show()
+alt.Chart(distributions).mark_bar().encode(
+    alt.X(alt.repeat("column"), type="quantitative", bin=alt.Bin(maxbins=40)),
+    alt.Y("count()", title="films"),
+).properties(width=260, height=200).repeat(column=list(distributions.columns)).show()
 print("films with zero votes:", (df["Vote_Count"] == 0).sum())
 
 # %% EDA releases over time
-per_year = df.groupby("Year").size()
+per_year = df.groupby("Year").size().rename("films").reset_index()
 
-figure, axes = plt.subplots(figsize=(9, 4))
-per_year.plot(ax=axes, color="#4c78a8")
-axes.set_title("films per release year")
-axes.set_xlabel("year")
-axes.set_ylabel("films")
-figure.tight_layout()
-plt.show()
+alt.Chart(per_year, title="films per release year").mark_line().encode(
+    alt.X("Year:Q", title="year", axis=alt.Axis(format="d", grid=False)),
+    alt.Y("films:Q"),
+).properties(width=560, height=240).show()
 
 # %% EDA languages
 languages = df["Original_Language"].value_counts()
 print(languages.head(10))
 
-figure, axes = plt.subplots(figsize=(7, 4))
-languages.head(10).sort_values().plot.barh(ax=axes, color="#4c78a8")
-axes.set_title("top 10 original languages")
-figure.tight_layout()
-plt.show()
+top_languages = languages.head(10).reset_index()
+alt.Chart(top_languages, title="top 10 original languages").mark_bar(cornerRadiusEnd=4).encode(
+    alt.X("count:Q", title="films"),
+    alt.Y("Original_Language:N", sort="-x", title=None),
+).properties(width=420, height=240).show()
 
 # %% EDA genres
 # Genre holds a comma-separated list, so one row per film and genre
@@ -99,29 +125,32 @@ genre_stats = genres.groupby("Genre").agg(
 ).sort_values("films", ascending=False)
 print(genre_stats)
 
-figure, axes = plt.subplots(figsize=(7, 5))
-genre_stats["films"].sort_values().plot.barh(ax=axes, color="#4c78a8")
-axes.set_title("films per genre")
-figure.tight_layout()
-plt.show()
+alt.Chart(genre_stats.reset_index(), title="films per genre").mark_bar(cornerRadiusEnd=4).encode(
+    alt.X("films:Q"),
+    alt.Y("Genre:N", sort="-x", title=None),
+).properties(width=420, height=340).show()
 
 # %% EDA relationships
 rated = df[df["Vote_Count"] >= 50]  # ignore ratings based on very few votes
 print(rated[["Popularity", "Vote_Count", "Vote_Average", "Year"]].corr(method="spearman").round(2))
 
-figure, axes = plt.subplots(1, 2, figsize=(12, 4))
-axes[0].scatter(rated["Vote_Count"], rated["Vote_Average"], s=6, alpha=0.4, color="#f58518")
-axes[0].set_xscale("log")
-axes[0].set_xlabel("vote count (log)")
-axes[0].set_ylabel("vote average")
+relationships = rated.rename(
+    columns={
+        "Vote_Count": "vote count (log)",
+        "Popularity": "popularity (log)",
+        "Vote_Average": "vote average",
+    }
+)
 
-axes[1].scatter(rated["Popularity"], rated["Vote_Average"], s=6, alpha=0.4, color="#54a24b")
-axes[1].set_xscale("log")
-axes[1].set_xlabel("popularity (log)")
-axes[1].set_ylabel("vote average")
-
-figure.tight_layout()
-plt.show()
+alt.Chart(relationships).mark_circle(size=12, opacity=0.3).encode(
+    alt.X(
+        alt.repeat("column"),
+        type="quantitative",
+        scale=alt.Scale(type="log"),
+        axis=alt.Axis(grid=False),  # log minor gridlines crowd the points
+    ),
+    alt.Y("vote average:Q", scale=alt.Scale(zero=False)),
+).properties(width=380, height=260).repeat(column=["vote count (log)", "popularity (log)"]).show()
 
 # %% EDA top titles
 print(df.nlargest(10, "Popularity")[["Title", "Year", "Popularity", "Vote_Average"]])

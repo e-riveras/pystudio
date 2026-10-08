@@ -18,6 +18,7 @@
 #   ctrl+g 3   focus the variables     ctrl+g r   restart the kernel
 #   ctrl+g 4   focus the plots         ctrl+g q   quit
 #   ctrl+g a   ask the assistant       ctrl+g k   pick another kernel
+#   ctrl+g c   the coding agent column
 #
 # Notice the rule drawn above each `# %%` below, and the faint wash over the
 # cell your cursor is in. That wash is exactly what `\c` will send.
