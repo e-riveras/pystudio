@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -39,18 +40,82 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--kernel", help="registered Jupyter kernel to use instead of a project interpreter"
     )
-    from pystudio.agents import AGENTS
+    from pystudio.agents import DEFAULT_AGENT
+    from pystudio.assistant.provider import DEFAULT_PROVIDER
 
-    parser.add_argument(
+    ai = parser.add_argument_group(
+        "AI features", "Both are off unless asked for here or in the environment."
+    )
+    ai.add_argument(
+        "--assistant",
+        nargs="?",
+        const=DEFAULT_PROVIDER,
+        metavar="PROVIDER",
+        help="turn on the ctrl+g a assistant, which writes cells through an API "
+        f"(default provider: {DEFAULT_PROVIDER}; or set $PYSTUDIO_ASSISTANT)",
+    )
+    ai.add_argument(
         "--agent",
-        choices=sorted(AGENTS),
-        help="coding agent for the ctrl+g c pane (default: $PYSTUDIO_AGENT, then claude)",
+        nargs="?",
+        const=DEFAULT_AGENT,
+        metavar="NAME",
+        help="turn on the ctrl+g c pane, which runs a coding agent's own CLI "
+        f"(default agent: {DEFAULT_AGENT}; or set $PYSTUDIO_AGENT)",
     )
     return parser
 
 
+EXTRAS = {
+    "assistant": ("anthropic",),
+    "agent": ("pyte", "mcp"),
+}
+"""The optional dependencies each AI feature needs, by the name of its extra."""
+
+
+def missing_extra(feature: str) -> str | None:
+    """How to install what ``feature`` needs, or None when it is all there."""
+    from importlib.util import find_spec
+
+    if all(find_spec(module) is not None for module in EXTRAS[feature]):
+        return None
+    return (
+        f"--{feature} needs the {feature!r} extra: "
+        f'uv tool install "pystudio-tui[{feature}] @ git+https://github.com/e-riveras/pystudio"'
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    from pystudio.agents import AGENT_VARIABLE, AGENTS, DEFAULT_AGENT
+    from pystudio.assistant.provider import DEFAULT_PROVIDER, PROVIDER_VARIABLE, PROVIDERS
+
+    # `pystudio --agent analysis.py` reads the file as the flag's optional
+    # value; hand it back when it is not a name the flag knows.
+    for flag, known, default in (
+        ("assistant", PROVIDERS, DEFAULT_PROVIDER),
+        ("agent", AGENTS, DEFAULT_AGENT),
+    ):
+        value = getattr(args, flag)
+        if value is not None and value not in known and args.file is None:
+            args.file = Path(value)
+            setattr(args, flag, default)
+
+    features = {
+        "assistant": (args.assistant or os.environ.get(PROVIDER_VARIABLE) or None, PROVIDERS),
+        "agent": (args.agent or os.environ.get(AGENT_VARIABLE) or None, AGENTS),
+    }
+    for feature, (name, known) in features.items():
+        if name is None:
+            continue
+        if name not in known:
+            names = ", ".join(sorted(known))
+            print(f"pystudio: unknown {feature} {name!r}; known: {names}", file=sys.stderr)
+            return 1
+        problem = missing_extra(feature)
+        if problem is not None:
+            print(f"pystudio: {problem}", file=sys.stderr)
+            return 1
+
     if shutil.which(args.nvim) is None:
         print(f"pystudio: cannot find {args.nvim!r} on PATH", file=sys.stderr)
         return 1
@@ -73,7 +138,12 @@ def main(argv: list[str] | None = None) -> int:
     from pystudio.app import PyStudioApp
 
     app = PyStudioApp(
-        path=args.file, clean=args.clean, nvim=args.nvim, choice=choice, agent=args.agent
+        path=args.file,
+        clean=args.clean,
+        nvim=args.nvim,
+        choice=choice,
+        assistant=features["assistant"][0],
+        agent=features["agent"][0],
     )
     app.run()
     return 0

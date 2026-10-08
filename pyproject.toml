@@ -26,12 +26,9 @@ classifiers = [
     "Topic :: Text Editors :: Integrated Development Environments (IDE)",
 ]
 dependencies = [
-    "anthropic>=1.12.0",
     "ipykernel>=7.4.0",
     "jupyter-client>=8.10.0",
-    "mcp>=2.3.0",
     "msgpack>=1.2.3",
-    "pyte>=0.8.2",
     "textual>=8.2.8",
     "textual-image>=0.14.1",
 ]
@@ -52,9 +49,12 @@ module-name = "pystudio"
 [dependency-groups]
 dev = [
     "altair>=6.3.0",
+    "anthropic>=1.12.1",
     "matplotlib>=3.11.2",
+    "mcp>=2.3.0",
     "numpy>=2.5.3",
     "pandas>=3.0.6",
+    "pyte>=0.8.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.9",
@@ -64,6 +64,18 @@ dev = [
 
 [project.scripts]
 pystudio = "pystudio.__main__:main"
+
+# Both AI features are off unless asked for, and so are their dependencies:
+#   uv tool install "pystudio-tui[ai] @ git+https://github.com/e-riveras/pystudio"
+[project.optional-dependencies]
+ai = ["pystudio-tui[assistant,agent]"]
+assistant = [
+    "anthropic>=1.12.1",
+]
+agent = [
+    "mcp>=2.3.0",
+    "pyte>=0.8.2",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

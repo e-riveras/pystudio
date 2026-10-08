@@ -35,3 +35,67 @@ def test_refuses_a_missing_neovim(capsys):
 @pytest.mark.parametrize("line", ["NVIM v0.10.0", "NVIM v1.0.0"])
 def test_accepts_a_new_enough_neovim(tmp_path, line):
     assert nvim_version(fake_nvim(tmp_path, line)) >= (0, 10)
+
+
+@pytest.fixture
+def started(tmp_path, monkeypatch):
+    """Run ``main`` up to the point of starting the app, and capture how it was built."""
+    built: dict = {}
+
+    class App:
+        def __init__(self, **kwargs) -> None:
+            built.update(kwargs)
+
+        def run(self) -> None:
+            pass
+
+    monkeypatch.setattr("pystudio.app.PyStudioApp", App)
+    monkeypatch.delenv("PYSTUDIO_ASSISTANT", raising=False)
+    monkeypatch.delenv("PYSTUDIO_AGENT", raising=False)
+    nvim = fake_nvim(tmp_path, "NVIM v0.12.5")
+
+    def run(*argv: str) -> dict:
+        built.clear()
+        assert main(["--nvim", nvim, "--kernel", "python3", *argv]) == 0
+        return dict(built)
+
+    return run
+
+
+def test_ai_features_are_off_by_default(started):
+    built = started()
+    assert built["assistant"] is None
+    assert built["agent"] is None
+
+
+def test_flags_turn_the_ai_features_on(started):
+    built = started("--assistant", "--agent")
+    assert built["assistant"] == "anthropic"
+    assert built["agent"] == "claude"
+
+
+def test_the_environment_turns_them_on_too(started, monkeypatch):
+    monkeypatch.setenv("PYSTUDIO_AGENT", "claude")
+    built = started()
+    assert built["agent"] == "claude"
+    assert built["assistant"] is None
+
+
+def test_a_file_after_a_flag_is_the_file(started, tmp_path):
+    script = tmp_path / "analysis.py"
+    built = started("--agent", str(script))
+    assert built["agent"] == "claude"
+    assert built["path"] == script
+
+
+def test_an_unknown_agent_is_refused(tmp_path, capsys):
+    nvim = fake_nvim(tmp_path, "NVIM v0.12.5")
+    assert main(["--nvim", nvim, "a.py", "--agent", "hal"]) == 1
+    assert "unknown agent 'hal'; known: claude" in capsys.readouterr().err
+
+
+def test_a_missing_extra_says_how_to_install_it(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr("pystudio.__main__.EXTRAS", {"agent": ("no_such_module_here",)})
+    nvim = fake_nvim(tmp_path, "NVIM v0.12.5")
+    assert main(["--nvim", nvim, "--agent"]) == 1
+    assert "pystudio-tui[agent]" in capsys.readouterr().err

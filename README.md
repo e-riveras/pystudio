@@ -41,6 +41,21 @@ pystudio analysis.py
 Each [release](https://github.com/e-riveras/pystudio/releases) also has a wheel
 attached, which `uv tool install` or `pipx install` take as a path.
 
+pystudio has two AI features, and both are off by default: nothing is sent
+anywhere, no agent is started, and their dependencies are not installed. To
+have them, install the extras and ask for them when you start:
+
+```sh
+uv tool install "pystudio-tui[ai] @ git+https://github.com/e-riveras/pystudio"
+pystudio analysis.py --assistant --agent
+```
+
+`[assistant]` and `[agent]` install one each; `[ai]` is both. `--assistant`
+turns on [the assistant](#the-assistant) and `--agent` turns on
+[the agent pane](#the-agent-pane). Setting `PYSTUDIO_ASSISTANT=anthropic` or
+`PYSTUDIO_AGENT=claude` in your shell profile does the same without the flag.
+Without them, `ctrl+g a` and `ctrl+g c` only say how to turn the feature on.
+
 Options: `--clean` starts Neovim without your config, `--nvim PATH` picks a
 different Neovim, `--python PATH` picks the kernel's interpreter, and
 `--kernel NAME` uses a registered Jupyter kernel instead.
@@ -92,6 +107,9 @@ it, so the tour cannot drift away from the code.
 
 ## The assistant
 
+Off by default; start pystudio with `--assistant` (see
+[Install and run](#install-and-run)).
+
 `ctrl+g a` swaps the console for a chat. Ask for code in plain words:
 
 ```
@@ -114,8 +132,7 @@ console and the history, but it is an expression evaluated in your live
 session, not a sandbox, so the chat is where to see what was asked.
 
 It needs credentials for Anthropic's API: set `ANTHROPIC_API_KEY`, or run
-`ant auth login`. Without them pystudio works as before and the chat says what
-is missing. The model is Claude Sonnet 5.5; `PYSTUDIO_ASSISTANT_MODEL` picks
+`ant auth login`. Without them the chat says what is missing. The model is Claude Sonnet 5.5; `PYSTUDIO_ASSISTANT_MODEL` picks
 another. Requests are billed to your account.
 
 What leaves your machine: your request, the buffer's text, and whatever the
@@ -125,9 +142,12 @@ until you ask it something.
 
 The model sits behind a small interface (`pystudio/assistant/provider.py`), so
 another provider is one module and one entry in `PROVIDERS`, selected with
-`PYSTUDIO_ASSISTANT`. Only Anthropic is implemented.
+`--assistant NAME`. Only Anthropic is implemented.
 
 ## The agent pane
+
+Off by default; start pystudio with `--agent` (see
+[Install and run](#install-and-run)).
 
 `ctrl+g c` opens a full-height column on the left and runs a coding agent in
 it: Claude Code today. It is the agent's own command line program in a terminal
@@ -157,9 +177,20 @@ Two things make it part of the IDE rather than a terminal beside it:
   read-only look at your live session that the assistant has. It cannot run
   your cells.
 
+The agent starts with a data science skill of pystudio's own,
+`pystudio:data-science`: how cells, the kernel tools and the plot pane work
+here, and how to lay out EDA, models and Bayesian workflows as cells. It is
+[one Markdown file](src/pystudio/agent_profile/SKILL.md), loaded for that
+session only; nothing is written to your Claude Code settings.
+`PYSTUDIO_AGENT_PROFILE=off` starts the agent without it.
+
+The agent uses its own login. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are
+not passed to Claude Code, since a key in the environment would otherwise take
+precedence over your subscription.
+
 The agent needs its CLI on `PATH`: `claude` for Claude Code. `--agent NAME` or
-`PYSTUDIO_AGENT` picks one; Claude Code is the default and so far the only
-entry. Adding another is a few lines in `pystudio/agents.py`, since any agent
+`PYSTUDIO_AGENT=NAME` picks one; Claude Code is what a bare `--agent` means and
+so far the only entry. Adding another is a few lines in `pystudio/agents.py`, since any agent
 that runs in a terminal works: only how it is told about the MCP server differs.
 
 `ctrl+g` belongs to pystudio, so the agent never receives it; Claude Code's own

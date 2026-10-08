@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -42,9 +42,11 @@ from pystudio.widgets import (
     NvimPane,
     PlotsPane,
     StatusBar,
-    TerminalPane,
     VariablesPane,
 )
+
+if TYPE_CHECKING:
+    from pystudio.widgets.terminal import TerminalPane
 
 log = logging.getLogger(__name__)
 
@@ -56,8 +58,8 @@ VIEWABLE_TYPES = {"DataFrame", "Series", "ndarray"}
 
 TWO_DIMENSIONAL = re.compile(r"^\(\d+, \d+\)$")
 
-PROVIDER_VARIABLE = "PYSTUDIO_ASSISTANT"
-"""Names the assistant's provider; see :data:`pystudio.assistant.provider.PROVIDERS`."""
+ASSISTANT_OFF = "the assistant is off; start pystudio with --assistant"
+AGENT_OFF = "the agent pane is off; start pystudio with --agent"
 
 DOCKED = ("console", "assistant")
 """The panes that share the bottom-left slot, one shown at a time."""
@@ -119,9 +121,14 @@ class PyStudioApp(App):
         nvim: str = "nvim",
         kernel_name: str = "python3",
         choice: KernelChoice | None = None,
-        assistant: ai.Provider | None = None,
+        assistant: ai.Provider | str | None = None,
         agent: Agent | str | None = None,
     ) -> None:
+        """``assistant`` and ``agent`` turn the two AI features on; both are off by default.
+
+        ``assistant`` is a provider or the name of one, ``agent`` an agent or
+        the name of one.
+        """
         super().__init__()
         self.path = path
         self.clean = clean
@@ -154,7 +161,11 @@ class PyStudioApp(App):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
-            yield TerminalPane(id="agent")
+            if self._agent is not None:
+                # Imported here: the terminal needs pyte, an optional dependency.
+                from pystudio.widgets.terminal import TerminalPane
+
+                yield TerminalPane(id="agent")
             yield from self._panes()
         yield StatusBar(kernel_name=self.choice.label, protocol=PROTOCOL, id="status")
 
@@ -169,12 +180,15 @@ class PyStudioApp(App):
             yield VariablesPane(id="variables")
             with ContentSwitcher(id="dock", initial="console"):
                 yield ConsolePane(id="console")
-                yield AssistantPane(id="assistant")
+                if self._provider is not None:
+                    yield AssistantPane(id="assistant")
             yield PlotsPane(id="plots")
 
     def on_mount(self) -> None:
         for pane_id, title in PANE_TITLES.items():
-            self.query_one(f"#{pane_id}").border_title = title
+            # The assistant's pane exists only when the assistant is on.
+            for pane in self.query(f"#{pane_id}"):
+                pane.border_title = title
         self.editor.focus()
         self.run_worker(self._start_kernel(), name="kernel-start")
 
@@ -209,6 +223,8 @@ class PyStudioApp(App):
 
     @property
     def agent_pane(self) -> TerminalPane:
+        from pystudio.widgets.terminal import TerminalPane
+
         return self.query_one("#agent", TerminalPane)
 
     @property
@@ -267,6 +283,9 @@ class PyStudioApp(App):
 
     def action_chord_focus(self, pane: str) -> None:
         self.cancel_chord()
+        if pane == "assistant" and self._provider is None:
+            self.status.set_note(ASSISTANT_OFF)
+            return
         if pane in DOCKED:
             self.query_one("#dock", ContentSwitcher).current = pane
         target = self.query_one(f"#{pane}")
@@ -352,6 +371,9 @@ class PyStudioApp(App):
     def action_chord_agent(self) -> None:
         """Open the agent column and focus it, or hide it when it has focus."""
         self.cancel_chord()
+        if self._agent is None:
+            self.status.set_note(AGENT_OFF)
+            return
         pane = self.agent_pane
         if pane.display and pane.has_focus:
             pane.display = False
@@ -376,11 +398,11 @@ class PyStudioApp(App):
         socket = await self._bridge.start()
         # Let the pane take its size before the agent asks for it.
         await asyncio.sleep(0)
-        await pane.start(agent.command(socket), cwd=self.cwd)
+        await pane.start(agent.command(socket), cwd=self.cwd, without_env=agent.without_env)
 
     def on_descendant_focus(self, event) -> None:
         # The agent reads files from disk, so it should see what the user sees.
-        if event.widget is self.agent_pane and self.editor.rpc.running:
+        if event.widget.id == "agent" and self.editor.rpc.running:
             self.editor.rpc.notify("nvim_command", "silent! wall")
 
     def action_chord_quit(self) -> None:
@@ -516,7 +538,9 @@ class PyStudioApp(App):
     async def _ask(self, text: str) -> None:
         try:
             if self._assistant is None:
-                provider = self._provider or ai.load(os.environ.get(PROVIDER_VARIABLE, "anthropic"))
+                provider = self._provider
+                if isinstance(provider, str):
+                    provider = ai.load(provider)
                 self._assistant = ai.Assistant(provider, AppWorkspace(self), self._shown)
             await self._assistant.ask(text)
         except ai.ProviderError as error:

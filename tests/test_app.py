@@ -414,9 +414,8 @@ async def test_escape_cancels_a_reply(tmp_path) -> None:
         assert "cancelled" in app.assistant_pane.transcript
 
 
-async def test_no_credentials_is_a_note_in_the_chat(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("PYSTUDIO_ASSISTANT", "nope")
-    app = app_with(tmp_path)
+async def test_an_unusable_provider_is_a_note_in_the_chat(tmp_path) -> None:
+    app = app_with(tmp_path, assistant="nope")
     async with app.run_test(size=SIZE) as pilot:
         await until(lambda: app.editor.channel > 0)
         await ask(app, pilot, "hello")
@@ -505,3 +504,35 @@ async def test_the_agent_pane_runs_the_agent_beside_the_editor(tmp_path) -> None
         assert not pane.display
         assert app.focused is app.editor
         assert pane.running, "hiding the pane keeps the agent"
+
+
+async def test_ai_features_are_off_unless_asked_for(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app.editor.channel > 0)
+        assert not app.query("#assistant")
+        assert not app.query("#agent")
+
+        await pilot.press("ctrl+g", "a")
+        assert "--assistant" in app.status.note
+        assert app.console_pane.display
+
+        await pilot.press("ctrl+g", "c")
+        assert "--agent" in app.status.note
+        assert isinstance(app.focused, NvimPane)
+
+
+def test_the_app_starts_without_the_optional_packages() -> None:
+    """Neither the app nor its entry point may import an optional dependency."""
+    import subprocess
+
+    code = (
+        "import sys\n"
+        "for name in ('anthropic', 'pyte', 'mcp'):\n"
+        "    sys.modules[name] = None\n"
+        "import pystudio.__main__, pystudio.app, pystudio.widgets\n"
+        "pystudio.__main__.build_parser()\n"
+        "pystudio.app.PyStudioApp(clean=True)\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

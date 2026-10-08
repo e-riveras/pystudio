@@ -148,3 +148,13 @@ def test_a_sequence_split_across_reads_is_kept_whole() -> None:
     term._feed(b"a\x1b[>")
     term._feed(b"5ub")
     assert term.text.strip() == "ab"
+
+
+async def test_named_variables_are_kept_from_the_program(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_FOR_TEST", "leaked")
+    script = "import os; print('value:', os.environ.get('SECRET_FOR_TEST'), os.environ.get('X'))"
+    app = Host()
+    async with app.run_test(size=(60, 10)):
+        term = app.term
+        await term.start([PY, "-c", script], env={"X": "given"}, without_env=["SECRET_FOR_TEST"])
+        await until(lambda: "value: None given" in term.text, what="the environment")

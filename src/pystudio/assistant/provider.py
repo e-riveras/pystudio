@@ -86,6 +86,10 @@ class Provider(Protocol):
     def start(self, system: str, tools: Sequence[ToolSpec]) -> Conversation: ...
 
 
+DEFAULT_PROVIDER = "anthropic"
+PROVIDER_VARIABLE = "PYSTUDIO_ASSISTANT"
+"""Set to a provider's name to turn the assistant on without the command line flag."""
+
 PROVIDERS = {"anthropic": "pystudio.assistant.anthropic_provider:AnthropicProvider"}
 """Provider name to ``module:class``, imported only when asked for."""
 

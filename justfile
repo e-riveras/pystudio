@@ -6,9 +6,9 @@ default: test
 run *ARGS:
     uv run pystudio {{ARGS}}
 
-# Install an editable `pystudio` command on PATH that tracks this checkout
+# Install an editable `pystudio` command on PATH that tracks this checkout, AI extras included
 install:
-    uv tool install --editable . --force
+    uv tool install --editable ".[ai]" --force
 
 test *ARGS:
     uv run pytest {{ARGS}}

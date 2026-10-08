@@ -110,6 +110,7 @@ class TerminalPane(Widget, can_focus=True):
         self.stream = pyte.ByteStream(self.screen_model)
         self.argv: list[str] = []
         self.env: dict[str, str] = {}
+        self.without_env: tuple[str, ...] = ()
         self.cwd: Path | None = None
         self.process: asyncio.subprocess.Process | None = None
         self._master: int | None = None
@@ -124,12 +125,21 @@ class TerminalPane(Widget, can_focus=True):
         return self.process is not None and self.process.returncode is None
 
     async def start(
-        self, argv: Sequence[str], *, cwd: Path | None = None, env: Mapping[str, str] = {}
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] = {},
+        without_env: Sequence[str] = (),
     ) -> None:
-        """Start ``argv`` on a fresh pty, sized to the pane."""
+        """Start ``argv`` on a fresh pty, sized to the pane.
+
+        The program inherits the environment, plus ``env``, minus ``without_env``.
+        """
         if self.running:
             return
         self.argv, self.cwd, self.env = list(argv), cwd, dict(env)
+        self.without_env = tuple(without_env)
         columns, lines = max(self.size.width, 20), max(self.size.height, 5)
         self.screen_model = Screen(columns, lines, self._write)
         self.stream = pyte.ByteStream(self.screen_model)
@@ -146,6 +156,8 @@ class TerminalPane(Widget, can_focus=True):
             "LINES": str(lines),
             **self.env,
         }
+        for name in self.without_env:
+            environment.pop(name, None)
         try:
             self.process = await asyncio.create_subprocess_exec(
                 *self.argv,
@@ -269,7 +281,9 @@ class TerminalPane(Widget, can_focus=True):
             cancel()
         if not self.running:
             if event.key == "enter" and self.argv:
-                await self.start(self.argv, cwd=self.cwd, env=self.env)
+                await self.start(
+                    self.argv, cwd=self.cwd, env=self.env, without_env=self.without_env
+                )
             return
         self._scroll_to_bottom()
         app_cursor = APPLICATION_CURSOR in self.screen_model.mode
