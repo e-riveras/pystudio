@@ -10,6 +10,8 @@ from pathlib import Path
 from PIL import Image as PILImage
 from textual import events
 from textual.containers import Container, Vertical
+from textual.message import Message
+from textual.timer import Timer
 from textual.widgets import Static
 from textual_image._terminal import get_cell_size
 from textual_image.renderable import Image as AutoRenderable
@@ -26,8 +28,20 @@ MAX_ZOOM = 32.0
 PAN_STEP = 0.2
 """How far one key press pans, as a fraction of what is on screen."""
 
+RENDER_DELAY = 0.15
+"""Wait for a zoom or a drag to pause before asking the kernel for a sharp render."""
+
+RESIZE_DELAY = 0.2
+"""Wait for a resize to finish before telling the kernel the new size."""
+
+CELLS_PER_INCH = 5
+"""A terminal line is about a fifth of an inch, which sets the size of a
+figure laid out for the pane: its text then comes out near the terminal's."""
+
 Size = tuple[float, float]
 Window = tuple[float, float, float, float]
+
+WHOLE: Window = (0.0, 0.0, 1.0, 1.0)
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -106,6 +120,10 @@ class Figure:
 
     png: bytes
     title: str = ""
+    figure_id: int | None = None
+    """The kernel's handle on the figure, while it can still draw it again."""
+    layout: Size | None = None
+    """The size in inches ``png`` was laid out at, or ``None`` for the author's own."""
     created: float = field(default_factory=time.time)
 
 
@@ -123,6 +141,7 @@ class PlotsPane(Vertical):
         ("k,up", "pan(0, -1)", "pan up"),
         ("j,down", "pan(0, 1)", "pan down"),
         ("f,enter", "fullscreen", "fullscreen"),
+        ("a", "reflow", "lay out for the pane"),
         ("ctrl+s", "save", "save plot"),
     ]
 
@@ -143,6 +162,22 @@ class PlotsPane(Vertical):
 
     can_focus = True
 
+    @dataclass
+    class RenderRequested(Message):
+        """The pane wants part of a figure drawn by the kernel, to fit ``room`` pixels."""
+
+        figure: int
+        room: tuple[int, int]
+        window: Window
+        size: Size | None
+
+    @dataclass
+    class Resized(Message):
+        """The room for a figure changed, in pixels."""
+
+        width: int
+        height: int
+
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
         self._figures: list[Figure] = []
@@ -150,6 +185,10 @@ class PlotsPane(Vertical):
         self._viewport = Viewport()
         self._source: PILImage.Image | None = None
         self._drag: tuple[int, int] | None = None
+        self.reflow = False
+        self._wanted: PlotsPane.RenderRequested | None = None
+        self._render_timer: Timer | None = None
+        self._resize_timer: Timer | None = None
 
     def compose(self):
         with Container(id="plot-stage"):
@@ -180,10 +219,30 @@ class PlotsPane(Vertical):
     def viewport(self) -> Viewport:
         return self._viewport
 
-    def add(self, png: bytes, *, title: str = "") -> None:
-        """Append a figure and show it."""
-        self._figures.append(Figure(png, title=title))
+    @property
+    def room(self) -> tuple[int, int] | None:
+        """The pixels there are for a figure, once the pane has been laid out."""
+        if not self.stage.size.width or not self.stage.size.height:
+            return None
+        width, height = self._pane_pixels()
+        return round(width), round(height)
+
+    def add(self, png: bytes, *, title: str = "", figure_id: int | None = None) -> None:
+        """Append a figure and show it.
+
+        With ``figure_id`` the kernel kept the figure, and can draw it again.
+        """
+        self._figures.append(Figure(png, title=title, figure_id=figure_id))
         self._show(len(self._figures) - 1)
+
+    def detach(self, figure_id: int | None = None) -> None:
+        """Forget the kernel's handle on one figure, or on all of them.
+
+        The figures stay, and zoom by enlarging the picture they arrived as.
+        """
+        for figure in self._figures:
+            if figure_id is None or figure.figure_id == figure_id:
+                figure.figure_id = None
 
     def _show(self, index: int) -> None:
         """Move to another figure, which starts fitted to the pane."""
@@ -217,6 +276,7 @@ class PlotsPane(Vertical):
         )
         self._draw(source if box == (0, 0, width, height) else source.crop(box))
         self._caption()
+        self._ask_kernel()
 
     def _draw(self, view: PILImage.Image) -> None:
         """Put ``view`` on screen at the size the viewport gives it.
@@ -233,6 +293,69 @@ class PlotsPane(Vertical):
         image.styles.height = int(_clamp(round(shown[1] / cell.height), 1, max(room.height, 1)))
         image.image = view
 
+    # ---------------------------------------------------------------- sharp renders
+
+    def _layout(self) -> Size | None:
+        """The size, in inches, a figure laid out for the pane should have."""
+        if not self.reflow:
+            return None
+        width, height = self._pane_pixels()
+        dpi = get_cell_size().height * CELLS_PER_INCH
+        return width / dpi, height / dpi
+
+    def _ask_kernel(self) -> None:
+        """Ask for the view on screen to be drawn at the pane's own resolution.
+
+        What was just drawn is the picture already held, enlarged. That is on
+        screen at once, and the kernel's render replaces it when it arrives.
+        """
+        if self._render_timer is not None:
+            self._render_timer.stop()
+            self._render_timer = None
+        self._wanted = None
+        figure, source = self.current, self._source
+        if figure is None or source is None or figure.figure_id is None:
+            return
+        pane = self._pane_pixels()
+        layout = self._layout()
+        if figure.layout != layout:
+            room, window = (round(pane[0]), round(pane[1])), WHOLE
+        else:
+            shown = self._viewport.shown(source.size, pane)
+            room, window = (
+                (round(shown[0]), round(shown[1])),
+                self._viewport.window(source.size, pane),
+            )
+            if window == WHOLE and all(
+                abs(have - want) <= max(2, want // 50)
+                for have, want in zip(source.size, room, strict=True)
+            ):
+                return
+        self._wanted = self.RenderRequested(figure.figure_id, room, window, layout)
+        self._render_timer = self.set_timer(RENDER_DELAY, self._send_request)
+
+    def _send_request(self) -> None:
+        self._render_timer = None
+        if self._wanted is not None:
+            self.post_message(self._wanted)
+
+    def show_render(self, request: RenderRequested, png: bytes | None) -> None:
+        """Take the kernel's answer to ``request``; ``None`` means it had none.
+
+        An answer to a view that has since moved on is dropped.
+        """
+        if request != self._wanted:
+            return
+        self._wanted = None
+        figure = self.current
+        if png is None or figure is None:
+            return
+        image = PILImage.open(BytesIO(png))
+        image.load()
+        if request.window == WHOLE:
+            figure.png, figure.layout, self._source = png, request.size, image
+        self._draw(image)
+
     def _caption(self) -> None:
         figure = self.current
         if figure is None:
@@ -242,12 +365,26 @@ class PlotsPane(Vertical):
             parts.append(figure.title)
         if self._viewport.zoom > 1.0:
             parts.append(f"{self._viewport.zoom:.1f}×")
+        if self.reflow and figure.figure_id is not None:
+            parts.append("fills pane")
         parts.append(time.strftime("%H:%M", time.localtime(figure.created)))
         parts.append(PROTOCOL)
         self.caption.update(" · ".join(parts))
 
     def on_resize(self, event: events.Resize) -> None:
+        if self.reflow:
+            # The figure is about to be laid out again, so the old view means nothing.
+            self._viewport.reset()
         self._render_current()
+        if self._resize_timer is not None:
+            self._resize_timer.stop()
+        self._resize_timer = self.set_timer(RESIZE_DELAY, self._announce_size)
+
+    def _announce_size(self) -> None:
+        self._resize_timer = None
+        room = self.room
+        if room is not None:
+            self.post_message(self.Resized(*room))
 
     # ---------------------------------------------------------------------- actions
 
@@ -270,6 +407,12 @@ class PlotsPane(Vertical):
         if self._source is None:
             return
         self._viewport.pan(dx * PAN_STEP, dy * PAN_STEP, self._source.size, self._pane_pixels())
+        self._render_current()
+
+    def action_reflow(self) -> None:
+        """Switch between the figure as its author sized it and one that fills the pane."""
+        self.reflow = not self.reflow
+        self._viewport.reset()
         self._render_current()
 
     def action_fullscreen(self) -> None:

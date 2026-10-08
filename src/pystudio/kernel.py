@@ -41,6 +41,9 @@ from pystudio.introspect import (
     frame_expr,
     parse_frame,
     parse_probe,
+    parse_render,
+    render_expr,
+    view_expr,
 )
 
 log = logging.getLogger(__name__)
@@ -276,6 +279,31 @@ class KernelSession:
         ok, text = await self.evaluate(expression)
         return parse_frame(text) if ok and text else Frame(kind="other")
 
+    def set_plot_view(self, width: int, height: int) -> None:
+        """Tell the kernel the size of the plot pane, so figures are drawn to fit it.
+
+        Not awaited: the kernel serves requests in order, so the size is in
+        place before anything sent after this runs.
+        """
+        self._send_expression(view_expr(width, height))
+
+    async def render_figure(
+        self,
+        figure: int,
+        room: tuple[int, int],
+        window: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
+        *,
+        size: tuple[float, float] | None = None,
+        fmt: str = "png",
+    ) -> bytes | None:
+        """Draw part of a figure the kernel kept, to fit ``room`` pixels.
+
+        ``None`` means the kernel no longer has the figure. ``size`` lays the
+        figure out again at that many inches first.
+        """
+        ok, text = await self.evaluate(render_expr(figure, room, window, size=size, fmt=fmt))
+        return parse_render(text) if ok else None
+
     async def evaluate(self, expression: str, timeout: float = FRAME_TIMEOUT) -> tuple[bool, str]:
         """Evaluate one expression quietly: its repr, or the error it raised.
 
@@ -448,6 +476,7 @@ class KernelSession:
                     data=content.get("data") or {},
                     display_id=transient.get("display_id"),
                     update=msg_type == "update_display_data",
+                    metadata=content.get("metadata") or {},
                 )
             )
         elif msg_type == "error":

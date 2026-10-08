@@ -59,6 +59,7 @@ class DisplayData(Message):
     data: dict[str, Any]
     display_id: str | None = None
     update: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

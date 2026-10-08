@@ -198,6 +198,43 @@ async def test_png_display_data_lands_in_the_plot_pane(tmp_path) -> None:
         await until(lambda: app.plots.count == 1, what="a figure in the plot pane")
 
 
+async def test_a_zoomed_figure_is_drawn_again_by_the_kernel(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        plots = app.plots
+        await app.kernel.execute("import matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\n")
+        await until(lambda: plots.count == 1, what="a figure in the plot pane")
+        assert plots.current.figure_id is not None
+        # Drawn for the pane, not at matplotlib's own 640 by 480.
+        assert PILImage.open(io.BytesIO(plots.current.png)).size[0] < 400
+
+        plots.focus()
+        whole = plots.image_widget.image
+        await pilot.press("+", "+", "+", "+")
+        enlarged = plots.image_widget.image
+        await until(
+            lambda: plots.image_widget.image not in (whole, enlarged), what="the sharp render"
+        )
+
+        # The kernel filled the room; the enlarged picture had a fraction of it.
+        assert plots.image_widget.image.size[0] > enlarged.size[0]
+
+
+async def test_a_restart_leaves_the_figures_viewable(tmp_path) -> None:
+    app = app_with(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(lambda: app._kernel_ready, what="a running kernel")
+        await app.kernel.execute("import matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\n")
+        await until(lambda: app.plots.count == 1, what="a figure in the plot pane")
+
+        await pilot.press("ctrl+g", "r")
+        await until(lambda: "kernel restarted" in transcript(app), what="the restart")
+
+        assert app.plots.count == 1
+        assert app.plots.current.figure_id is None
+
+
 async def test_tab_completes_at_the_prompt(tmp_path) -> None:
     app = app_with(tmp_path)
     async with app.run_test(size=SIZE) as pilot:

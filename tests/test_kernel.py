@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import stat
 import sys
 from pathlib import Path
 
+import pytest
+from PIL import Image as PILImage
+
 from pystudio import messages as m
+from pystudio.introspect import MAX_FIGURES
 from pystudio.kernel import KernelSession
 
 from .conftest import Recorder
@@ -232,3 +238,83 @@ async def test_restart_releases_a_waiting_run(kernel: KernelSession) -> None:
     except KernelReset:
         return
     raise AssertionError("the run was not released")
+
+
+PLOT = "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.plot([1, 2, 3])\n"
+
+
+def figure_id(message: m.DisplayData) -> int:
+    return message.metadata["image/png"]["pystudio"]["figure"]
+
+
+def size_of(png: bytes) -> tuple[int, int]:
+    return PILImage.open(io.BytesIO(png)).size
+
+
+async def test_figure_is_drawn_to_fit_the_pane(kernel: KernelSession, recorder: Recorder) -> None:
+    kernel.set_plot_view(900, 300)
+    await kernel.execute(PLOT + "ax.set_title('a  title')\n")
+    shown = await recorder.wait_for(m.DisplayData)
+
+    width, height = size_of(base64.b64decode(shown.data["image/png"]))
+    assert height == pytest.approx(300, abs=2)
+    assert width < 900
+    assert shown.metadata["image/png"]["pystudio"]["title"] == "a title"
+
+
+async def test_kept_figure_is_drawn_again(kernel: KernelSession, recorder: Recorder) -> None:
+    await kernel.execute(PLOT)
+    shown = await recorder.wait_for(m.DisplayData)
+    recorder.clear()
+
+    whole = await kernel.render_figure(figure_id(shown), (1200, 1200))
+    part = await kernel.render_figure(figure_id(shown), (800, 400), (0.25, 0.25, 0.75, 0.5))
+
+    assert whole is not None and part is not None
+    assert max(size_of(whole)) == pytest.approx(1200, abs=2)
+    # A quarter of the height and half of the width: wider than the room, so
+    # it is the width that fills it.
+    assert size_of(part)[0] == pytest.approx(800, abs=2)
+    assert size_of(part)[1] < 400
+    assert not recorder.of(m.DisplayData)
+
+
+async def test_figure_is_laid_out_again_at_another_size(
+    kernel: KernelSession, recorder: Recorder
+) -> None:
+    await kernel.execute(PLOT)
+    shown = await recorder.wait_for(m.DisplayData)
+
+    wide = await kernel.render_figure(figure_id(shown), (1000, 250), size=(10.0, 2.5))
+    again = await kernel.render_figure(figure_id(shown), (640, 480))
+
+    assert wide is not None and again is not None
+    assert size_of(wide) == pytest.approx((1000, 250), abs=2)
+    # The figure the user made keeps the size they gave it.
+    assert size_of(again)[0] / size_of(again)[1] == pytest.approx(4 / 3, rel=0.1)
+
+
+async def test_figure_can_be_drawn_as_a_vector(kernel: KernelSession, recorder: Recorder) -> None:
+    await kernel.execute(PLOT)
+    shown = await recorder.wait_for(m.DisplayData)
+
+    svg = await kernel.render_figure(figure_id(shown), (640, 480), fmt="svg")
+
+    assert svg is not None and b"<svg" in svg
+
+
+async def test_only_recent_figures_are_kept(kernel: KernelSession, recorder: Recorder) -> None:
+    await kernel.execute(PLOT)
+    first = await recorder.wait_for(m.DisplayData)
+    await kernel.run(f"for _ in range({MAX_FIGURES}):\n    plt.figure().gca().plot([1, 2])\n")
+
+    assert await kernel.render_figure(figure_id(first), (100, 100)) is None
+
+
+async def test_restart_forgets_the_figures(kernel: KernelSession, recorder: Recorder) -> None:
+    await kernel.execute(PLOT)
+    shown = await recorder.wait_for(m.DisplayData)
+
+    await kernel.restart()
+
+    assert await kernel.render_figure(figure_id(shown), (100, 100)) is None

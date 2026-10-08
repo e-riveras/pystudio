@@ -204,6 +204,7 @@ class PyStudioApp(App):
             self.status.set_state("dead")
             return
         self._kernel_ready = True
+        self._send_plot_view()
 
     async def on_unmount(self) -> None:
         if self._bridge is not None:
@@ -325,6 +326,9 @@ class PyStudioApp(App):
 
     async def _restart(self) -> None:
         await self.kernel.restart()
+        # The new kernel has none of the figures the old one kept.
+        self.plots.detach()
+        self._send_plot_view()
         self.console_pane.show_note("kernel restarted")
 
     def action_chord_kernels(self) -> None:
@@ -362,6 +366,7 @@ class PyStudioApp(App):
             self.kernel = self._session(choice)
             self.status.set_kernel(choice.label)
             self.variables.show([])
+            self.plots.detach()
             await self._start_kernel()
         finally:
             self._switching = False
@@ -446,7 +451,10 @@ class PyStudioApp(App):
     def on_display_data(self, message: m.DisplayData) -> None:
         png = message.data.get("image/png")
         if png is not None:
-            self.plots.add(_decode_png(png))
+            kept = (message.metadata.get("image/png") or {}).get("pystudio") or {}
+            self.plots.add(
+                _decode_png(png), title=str(kept.get("title", "")), figure_id=kept.get("figure")
+            )
             return
         text = message.data.get("text/plain")
         if text:
@@ -508,6 +516,35 @@ class PyStudioApp(App):
             int(reply.get("cursor_start", cursor_pos)),
             int(reply.get("cursor_end", cursor_pos)),
         )
+
+    def on_plots_pane_resized(self, message: PlotsPane.Resized) -> None:
+        self._send_plot_view()
+
+    def _send_plot_view(self) -> None:
+        """Tell the kernel how much room a figure has, so it draws them to fit."""
+        room = self.plots.room
+        if self._kernel_ready and room is not None:
+            self.kernel.set_plot_view(*room)
+
+    def on_plots_pane_render_requested(self, message: PlotsPane.RenderRequested) -> None:
+        if self._kernel_ready:
+            self.run_worker(
+                self._render_plot(message), name="plot-render", group="plot-render", exclusive=True
+            )
+
+    async def _render_plot(self, request: PlotsPane.RenderRequested) -> None:
+        try:
+            png = await self.kernel.render_figure(
+                request.figure, request.room, request.window, size=request.size
+            )
+        except (TimeoutError, KernelReset):
+            # The kernel is busy or gone. The enlarged picture stays on screen.
+            png = None
+        else:
+            if png is None:
+                self.plots.detach(request.figure)
+        if self.is_running:
+            self.plots.show_render(request, png)
 
     def on_variables_pane_inspect(self, message: VariablesPane.Inspect) -> None:
         variable = message.variable

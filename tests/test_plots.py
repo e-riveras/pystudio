@@ -8,7 +8,7 @@ import pytest
 from PIL import Image as PILImage
 from textual.app import App
 
-from pystudio.widgets.plots import MAX_ZOOM, PlotsPane, Viewport
+from pystudio.widgets.plots import MAX_ZOOM, RENDER_DELAY, WHOLE, PlotsPane, Viewport
 
 FIGURE = (640.0, 480.0)
 PANE = (400.0, 400.0)
@@ -21,8 +21,15 @@ def png(size: tuple[int, int] = (64, 48), colour: str = "red") -> bytes:
 
 
 class PlotsApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        self.requests: list[PlotsPane.RenderRequested] = []
+
     def compose(self):
         yield PlotsPane(id="plots")
+
+    def on_plots_pane_render_requested(self, message: PlotsPane.RenderRequested) -> None:
+        self.requests.append(message)
 
     @property
     def plots(self) -> PlotsPane:
@@ -173,3 +180,85 @@ def _scroll_up():
     from textual import events
 
     return events.MouseScrollUp
+
+
+# -------------------------------------------------------------------- sharp renders
+
+
+async def test_a_figure_the_kernel_kept_is_asked_for_at_the_size_on_screen() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add(png((64, 48)), figure_id=7)
+        await pilot.pause(RENDER_DELAY * 2)
+
+        (request,) = app.requests
+        assert (request.figure, request.window, request.size) == (7, WHOLE, None)
+        assert request.room[1] == plots.room[1]
+
+        plots.show_render(request, png(request.room, "blue"))
+        await pilot.pause(RENDER_DELAY * 2)
+
+        # The picture held now is the sharp one, so there is nothing left to ask.
+        assert plots.current.png == png(request.room, "blue")
+        assert len(app.requests) == 1
+
+
+async def test_a_plain_picture_is_never_asked_for() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.plots.add(png())
+        app.plots.focus()
+        await pilot.press("+")
+        await pilot.pause(RENDER_DELAY * 2)
+
+        assert app.requests == []
+
+
+async def test_a_burst_of_zooming_asks_once_and_drops_the_stale_answer() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add(png(plots.room), figure_id=1)
+        plots.focus()
+        await pilot.press("+", "+", "+")
+        await pilot.pause(RENDER_DELAY * 2)
+
+        (request,) = app.requests
+        assert request.window != WHOLE
+
+        await pilot.press("+")
+        shown = plots.image_widget.image
+        plots.show_render(request, png(request.room, "blue"))
+        assert plots.image_widget.image is shown
+
+
+async def test_a_lays_the_figure_out_for_the_pane() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add(png(plots.room), figure_id=1)
+        plots.focus()
+        await pilot.press("a")
+        await pilot.pause(RENDER_DELAY * 2)
+
+        (request,) = app.requests
+        assert request.room == plots.room
+        assert request.size == pytest.approx((plots.room[0] / 100, plots.room[1] / 100))
+
+        plots.show_render(request, png(request.room))
+        assert plots.current.layout == request.size
+
+
+async def test_a_detached_figure_still_zooms() -> None:
+    app = PlotsApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        plots = app.plots
+        plots.add(png(plots.room), figure_id=1)
+        plots.detach()
+        plots.focus()
+        await pilot.press("+")
+        await pilot.pause(RENDER_DELAY * 2)
+
+        assert plots.viewport.zoom > 1.0
+        assert app.requests == []
