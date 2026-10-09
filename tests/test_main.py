@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from pystudio.__main__ import demo_problem, main, nvim_version
+from pystudio.__main__ import demo_problem, kernel_python, main, nvim_version
+from pystudio.interpreter import KernelChoice
 
 
 def fake_nvim(tmp_path, version_line: str) -> str:
@@ -123,3 +124,34 @@ def test_demo_says_what_the_interpreter_lacks(tmp_path, capsys, monkeypatch):
     bare.chmod(bare.stat().st_mode | stat.S_IEXEC)
     assert demo_problem(bare) is not None and "pystudio-tui[demo]" in demo_problem(bare)
     assert demo_problem(Path(sys.executable)) is None
+
+
+def test_demo_checks_pystudios_own_python_too(tmp_path, capsys, monkeypatch):
+    """A plain install has no project environment, and its own Python lacks the tour's imports.
+
+    Its kernelspec names a bare ``python``, and no ``python`` need be on PATH.
+    """
+    from jupyter_client.kernelspec import KernelSpec, KernelSpecManager
+
+    spec = KernelSpec(argv=["python", "-m", "ipykernel_launcher"], language="python")
+    monkeypatch.setattr(KernelSpecManager, "get_kernel_spec", lambda self, name: spec)
+    monkeypatch.setattr(
+        "pystudio.__main__.shutil.which", lambda name: name if "nvim" in name else None
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    assert kernel_python(KernelChoice()) == Path(sys.executable)
+    monkeypatch.setattr("pystudio.__main__.DEMO_NEEDS", ("no_such_module_here",))
+    assert main(["--nvim", fake_nvim(tmp_path, "NVIM v0.12.5"), "--demo"]) == 1
+    assert "pystudio-tui[demo]" in capsys.readouterr().err
+
+
+def test_an_unknown_kernel_has_no_interpreter_to_check():
+    assert kernel_python(KernelChoice(kernel_name="no_such_kernel_here")) is None
+
+
+def test_version_is_printed(capsys):
+    with pytest.raises(SystemExit) as stopped:
+        main(["--version"])
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out.startswith("pystudio 0.")

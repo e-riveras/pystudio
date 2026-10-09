@@ -6,8 +6,15 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `pystudio --version`.
+
 ### Fixed
 
+- `pystudio --demo` after a plain install now says the tour needs numpy, pandas
+  and matplotlib and how to install them, instead of starting and failing at
+  the first import. The check used to run only for a project environment.
 - Quitting while the kernel is still starting no longer ends in a traceback.
 - Closing the agent pane no longer fails on macOS when its program has already
   exited.

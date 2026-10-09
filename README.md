@@ -33,8 +33,13 @@ pystudio analysis.py
 Each [release](https://github.com/e-riveras/pystudio/releases) also has a wheel
 attached, which `uv tool install` or `pipx install` take as a path.
 
-To look around first, take [the guided tour](#the-guided-tour):
-`pystudio --demo`.
+To look around first, take [the guided tour](#the-guided-tour). It plots, so
+install pystudio with what the tour imports:
+
+```sh
+uv tool install "pystudio-tui[demo] @ git+https://github.com/e-riveras/pystudio"
+pystudio --demo
+```
 
 pystudio has two AI features, and both are off by default: nothing is sent
 anywhere, no agent is started, and their dependencies are not installed. To

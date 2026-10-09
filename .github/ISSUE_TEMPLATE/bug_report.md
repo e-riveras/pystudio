@@ -20,7 +20,7 @@ labels: bug
 
 **Environment**
 
-- pystudio version:
+- `pystudio --version`:
 - Operating system:
 - Terminal (Kitty, Ghostty, WezTerm, iTerm2, ...):
 - `nvim --version | head -1`:

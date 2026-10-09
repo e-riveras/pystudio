@@ -9,6 +9,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pystudio.interpreter import KernelChoice
 
 MIN_NVIM = (0, 10)
 
@@ -44,6 +48,32 @@ def demo_problem(python: Path) -> str | None:
     )
 
 
+def kernel_python(choice: KernelChoice) -> Path | None:
+    """The interpreter ``choice`` runs, or None when its kernelspec does not say.
+
+    Without a project environment the kernel comes from a kernelspec, whose
+    first argument is the interpreter. That is the case right after a plain
+    install, the one most likely to lack what the tour imports. jupyter_client
+    runs a bare ``python`` there as the Python it is running in itself, not as
+    whatever ``python`` is on PATH, and so does this.
+    """
+    if choice.python is not None:
+        return choice.python
+    from jupyter_client.kernelspec import KernelSpecManager, NoSuchKernel
+
+    try:
+        spec = KernelSpecManager().get_kernel_spec(choice.kernel_name)
+    except NoSuchKernel:
+        return None
+    if spec.language != "python" or not spec.argv:
+        return None
+    major, minor = sys.version_info[:2]
+    if spec.argv[0] in {"python", f"python{major}", f"python{major}.{minor}"}:
+        return Path(sys.executable)
+    found = shutil.which(spec.argv[0])
+    return Path(found) if found is not None else None
+
+
 def nvim_version(nvim: str) -> tuple[int, int] | None:
     """Major and minor of ``nvim --version``, or None if it cannot be read."""
     try:
@@ -54,6 +84,18 @@ def nvim_version(nvim: str) -> tuple[int, int] | None:
     return (int(match[1]), int(match[2])) if match else None
 
 
+def installed_version() -> str:
+    """The version of the installed distribution, which is what a bug report needs."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("pystudio-tui")
+    except PackageNotFoundError:
+        from pystudio import __version__
+
+        return __version__
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pystudio",
@@ -61,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
         "variables and plots in one screen.",
     )
     parser.add_argument("file", nargs="?", type=Path, help="script to open in the editor")
+    parser.add_argument("--version", action="version", version=f"pystudio {installed_version()}")
     parser.add_argument(
         "--demo",
         action="store_true",
@@ -177,8 +220,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pystudio: {error}", file=sys.stderr)
         return 1
 
-    if args.demo and choice.python is not None:
-        problem = demo_problem(choice.python)
+    python = kernel_python(choice) if args.demo else None
+    if python is not None:
+        problem = demo_problem(python)
         if problem is not None:
             print(f"pystudio: {problem}", file=sys.stderr)
             return 1
