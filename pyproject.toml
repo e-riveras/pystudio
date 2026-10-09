@@ -1,6 +1,6 @@
 [project]
 name = "pystudio-tui"
-version = "0.2.0"
+version = "0.2.1"
 description = "A terminal IDE for Python data science: embedded Neovim, a Jupyter kernel, variables and plots in one screen"
 readme = "README.md"
 license = "MIT"

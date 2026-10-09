@@ -11,4 +11,4 @@ The pieces are deliberately separable:
     The Textual shell that puts those two together in four panes.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
