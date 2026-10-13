@@ -96,6 +96,34 @@ class Screen(pyte.HistoryScreen):
             self.erase_in_display(2)
             self.cursor_position()
 
+    def scroll_up(self, count: int | None = None, **kwargs: Any) -> None:
+        """``CSI n S``: move the scrolling region up, blank lines coming in below.
+
+        Claude Code scrolls its transcript this way before it paints the new
+        lines. pyte has no handler for it, and without one they land on top
+        of the old ones.
+        """
+        _, bottom = self.margins or (0, self.lines - 1)
+        y, self.cursor.y = self.cursor.y, bottom
+        for _ in range(min(count or 1, self.lines)):
+            self.index()
+        self.cursor.y = y
+
+    def scroll_down(self, count: int | None = None, **kwargs: Any) -> None:
+        """``CSI n T``: move the scrolling region down, blank lines coming in above."""
+        top, _ = self.margins or (0, self.lines - 1)
+        y, self.cursor.y = self.cursor.y, top
+        for _ in range(min(count or 1, self.lines)):
+            self.reverse_index()
+        self.cursor.y = y
+
+
+class Stream(pyte.ByteStream):
+    """pyte's stream, which also passes on the two scrolling sequences."""
+
+    csi = {**pyte.ByteStream.csi, "S": "scroll_up", "T": "scroll_down"}
+    events = pyte.ByteStream.events | {"scroll_up", "scroll_down"}
+
 
 class TerminalPane(Widget, can_focus=True):
     """Runs one program on a pty. Started on demand, restarted with enter once it exits."""
@@ -107,7 +135,7 @@ class TerminalPane(Widget, can_focus=True):
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
         self.screen_model = Screen(80, 24, self._write)
-        self.stream = pyte.ByteStream(self.screen_model)
+        self.stream = Stream(self.screen_model)
         self.argv: list[str] = []
         self.env: dict[str, str] = {}
         self.without_env: tuple[str, ...] = ()
@@ -142,7 +170,7 @@ class TerminalPane(Widget, can_focus=True):
         self.without_env = tuple(without_env)
         columns, lines = max(self.size.width, 20), max(self.size.height, 5)
         self.screen_model = Screen(columns, lines, self._write)
-        self.stream = pyte.ByteStream(self.screen_model)
+        self.stream = Stream(self.screen_model)
         self._carry = b""
         self.notice = ""
 

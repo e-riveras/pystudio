@@ -8,7 +8,7 @@ import time
 
 from textual.app import App, ComposeResult
 
-from pystudio.widgets.terminal import TerminalPane, rich_color
+from pystudio.widgets.terminal import Screen, Stream, TerminalPane, rich_color
 
 PY = sys.executable
 
@@ -158,3 +158,32 @@ async def test_named_variables_are_kept_from_the_program(monkeypatch) -> None:
         term = app.term
         await term.start([PY, "-c", script], env={"X": "given"}, without_env=["SECRET_FOR_TEST"])
         await until(lambda: "value: None given" in term.text, what="the environment")
+
+
+def screen_after(data: bytes, *, columns: int = 10, lines: int = 5) -> list[str]:
+    screen = Screen(columns, lines, lambda reply: None)
+    Stream(screen).feed(data)
+    return [line.rstrip() for line in screen.display]
+
+
+def test_scroll_up_moves_the_scrolling_region():
+    """Claude Code scrolls its transcript with CSI S, then paints the lines that came in."""
+    rows = b"".join(
+        b"\x1b[%d;1H%s" % (y, name) for y, name in enumerate([b"top", b"a", b"b", b"c", b"foot"], 1)
+    )
+    # rows 2 to 4 scroll; the header and the footer stay where they are
+    assert screen_after(rows + b"\x1b[2;4r\x1b[2S\x1b[r") == ["top", "c", "", "", "foot"]
+    assert screen_after(rows + b"\x1b[2;4r\x1b[S\x1b[4;1Hnew") == ["top", "b", "c", "new", "foot"]
+
+
+def test_scroll_down_moves_the_scrolling_region():
+    rows = b"".join(
+        b"\x1b[%d;1H%s" % (y, name) for y, name in enumerate([b"top", b"a", b"b", b"c", b"foot"], 1)
+    )
+    assert screen_after(rows + b"\x1b[2;4r\x1b[1T") == ["top", "", "a", "b", "foot"]
+
+
+def test_scrolling_leaves_the_cursor_where_it_was():
+    screen = Screen(10, 5, lambda reply: None)
+    Stream(screen).feed(b"\x1b[3;4H\x1b[2S\x1b[1T")
+    assert (screen.cursor.y, screen.cursor.x) == (2, 3)

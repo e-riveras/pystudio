@@ -6,6 +6,11 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The agent pane no longer paints new lines of a reply over the old ones.
+  Claude Code scrolls its transcript with `CSI S`, which the terminal ignored.
+
 ## [0.2.1] - 2026-10-09
 
 ### Added
