@@ -201,7 +201,8 @@ that runs in a terminal works: only how it is told about the MCP server differs.
 
 `ctrl+g` belongs to pystudio, so the agent never receives it; Claude Code's own
 `ctrl+g` shortcut is not available here. `shift+enter` adds a line without
-sending. The mouse wheel scrolls back, and any key returns to the present.
+sending. The mouse wheel and clicks go to the agent, which scrolls its own
+transcript.
 
 ## Keys
 

@@ -46,6 +46,11 @@ ALTERNATE_SCREENS = {47 << 5, 1047 << 5, 1049 << 5}
 
 FOCUS_EVENTS = 1004 << 5
 
+MOUSE_REPORTING = {1000 << 5, 1002 << 5, 1003 << 5}
+SGR_MOUSE = 1006 << 5
+LEFT_BUTTON, WHEEL_UP, WHEEL_DOWN = 0, 64, 65
+"""Button numbers of the xterm mouse protocol."""
+
 UNSUPPORTED = re.compile(rb"\x1b\[(?:[<>=][0-9;]*[A-Za-z]|\?u)")
 """CSI sequences pyte cannot parse and would print the tail of: the kitty
 keyboard protocol (``CSI > 5 u``, ``CSI < u``, ``CSI ? u``), modifyOtherKeys
@@ -274,6 +279,8 @@ class TerminalPane(Widget, can_focus=True):
         self._carry = data[cut.start() :] if cut else b""
         if cut:
             data = data[: cut.start()]
+        # The program paints the screen it knows, not the scrollback on show.
+        self._scroll_to_bottom()
         self.stream.feed(UNSUPPORTED.sub(b"", data))
 
     def _drain(self) -> None:
@@ -327,18 +334,44 @@ class TerminalPane(Widget, can_focus=True):
             text = f"\x1b[200~{text}\x1b[201~"
         self._write(text.encode())
 
+    def _report_mouse(
+        self, event: events.MouseEvent, button: int, *, release: bool = False
+    ) -> bool:
+        """Pass a mouse event on to a program that asked for them. False if it did not."""
+        mode = self.screen_model.mode
+        if not self.running or not (mode & MOUSE_REPORTING):
+            return False
+        offset = event.get_content_offset(self)
+        x, y = (offset.x + 1, offset.y + 1) if offset is not None else (1, 1)
+        if SGR_MOUSE in mode:
+            self._write(f"\x1b[<{button};{x};{y}{'m' if release else 'M'}".encode())
+        elif x <= 223 and y <= 223:
+            # The older encoding: one byte each, and a release does not say which button.
+            self._write(b"\x1b[M" + bytes([32 + (3 if release else button), 32 + x, 32 + y]))
+        return True
+
     def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
         event.stop()
-        self.screen_model.prev_page()
-        self.refresh()
+        # A program that draws its own transcript, as Claude Code does, scrolls
+        # it itself. Paging the scrollback under it would mix the two.
+        if not self._report_mouse(event, WHEEL_UP):
+            self.screen_model.prev_page()
+            self.refresh()
 
     def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
         event.stop()
-        self.screen_model.next_page()
-        self.refresh()
+        if not self._report_mouse(event, WHEEL_DOWN):
+            self.screen_model.next_page()
+            self.refresh()
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         self.focus()
+        if event.button == 1:
+            self._report_mouse(event, LEFT_BUTTON)
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if event.button == 1:
+            self._report_mouse(event, LEFT_BUTTON, release=True)
 
     def _scroll_to_bottom(self) -> None:
         history = self.screen_model.history

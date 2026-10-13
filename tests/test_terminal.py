@@ -6,6 +6,7 @@ import asyncio
 import sys
 import time
 
+from textual import events
 from textual.app import App, ComposeResult
 
 from pystudio.widgets.terminal import Screen, Stream, TerminalPane, rich_color
@@ -187,3 +188,30 @@ def test_scrolling_leaves_the_cursor_where_it_was():
     screen = Screen(10, 5, lambda reply: None)
     Stream(screen).feed(b"\x1b[3;4H\x1b[2S\x1b[1T")
     assert (screen.cursor.y, screen.cursor.x) == (2, 3)
+
+
+async def test_the_wheel_goes_to_a_program_that_asks_for_the_mouse() -> None:
+    """Claude Code scrolls its own transcript; paging ours under it mixed the text."""
+    script = "import sys\nsys.stdout.write('\\x1b[?1000h\\x1b[?1006h'); sys.stdout.flush()\n" + ECHO
+    app = Host()
+    async with app.run_test(size=(60, 10)) as pilot:
+        term = app.term
+        term.focus()
+        await term.start([PY, "-c", script])
+        await until(lambda: 1006 << 5 in term.screen_model.mode, what="mouse reporting")
+        await pilot._post_mouse_events([events.MouseScrollUp], term, offset=(4, 2))
+        await until(lambda: "b'\\x1b[<64;5;3M'" in term.text, what="the wheel")
+        await pilot.click(term, offset=(0, 0))
+        await until(lambda: "b'\\x1b[<0;1;1M" in term.text, what="the click")
+        assert term.screen_model.history.position == term.screen_model.history.size
+        await pilot.press("q")
+
+
+def test_output_brings_the_scrollback_back_to_the_present() -> None:
+    """A program paints the screen it knows; on a page of scrollback its lines land on old ones."""
+    pane = TerminalPane()
+    pane._feed(b"".join(b"line %d\r\n" % i for i in range(60)))
+    pane.screen_model.prev_page()
+    assert "line 59" not in pane.text
+    pane._feed(b"new")
+    assert pane.text.splitlines()[-2:] == ["line 59", "new"]

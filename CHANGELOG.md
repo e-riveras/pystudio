@@ -10,6 +10,9 @@ All notable changes to this project are recorded here. The format follows
 
 - The agent pane no longer paints new lines of a reply over the old ones.
   Claude Code scrolls its transcript with `CSI S`, which the terminal ignored.
+- The mouse wheel in the agent pane no longer mixes the text. The wheel and
+  clicks now go to a program that asks for the mouse, as Claude Code does, and
+  new output returns a scrolled-back pane to the present.
 
 ## [0.2.1] - 2026-10-09
 
